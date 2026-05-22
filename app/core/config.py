@@ -21,6 +21,8 @@ class Settings(BaseSettings):
 
     # Auth
     api_key: str = "change-me-in-production"
+    # Write-only key — safe to embed in browser JS (only grants access to /track)
+    write_key: Optional[str] = None
 
     # LLM for cluster NER + summarization (via litellm)
     anthropic_api_key: Optional[str] = None

@@ -8,14 +8,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import verify_api_key
+from app.core.auth import verify_api_key, verify_track_key
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.event import Event
 from app.models.persona import Persona
 from app.schemas.persona import EventCreate, EventResponse
 
-router = APIRouter(tags=["events"], dependencies=[Depends(verify_api_key)])
+# No router-level auth — each endpoint declares its own so /track can use write_key
+router = APIRouter(tags=["events"])
 
 
 async def upload_screenshot(b64: str) -> Optional[str]:
@@ -45,6 +46,7 @@ async def upload_screenshot(b64: str) -> Optional[str]:
 async def track_event(
     body: EventCreate,
     distinct_id: str = Query(..., description="The persona's distinct_id to track against"),
+    _: str = Depends(verify_track_key),
     db: AsyncSession = Depends(get_db),
 ):
     """Track an event for a persona by distinct_id.
@@ -84,6 +86,7 @@ async def get_persona_events(
     limit: int = Query(default=50, le=500),
     offset: int = Query(default=0, ge=0),
     event_type: Optional[str] = Query(default=None, description="Filter by event type"),
+    _: str = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ):
     """Get the event timeline for a persona."""
