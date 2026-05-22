@@ -4,176 +4,533 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tenera Persona Tracking</title>
+    <link rel="icon" href="/favicon.ico" type="image/svg+xml">
     <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/rrweb-player@latest/dist/style.css">
+    <style>
+        /* ── Tabs ── */
+        .tabs { display: flex; gap: 2px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+        .tab {
+            padding: 8px 18px; font-size: 13px; font-weight: 500; cursor: pointer;
+            border: none; background: none; color: var(--text-3); border-bottom: 2px solid transparent;
+            margin-bottom: -1px; font-family: inherit; transition: color 0.18s;
+        }
+        .tab:hover { color: var(--text-1); }
+        .tab.active { color: var(--text-1); border-bottom-color: var(--text-1); }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        /* ── Stats row ── */
+        .stats-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px; }
+        .stat-card {
+            background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-card);
+            padding: 14px 16px;
+        }
+        .stat-card .num { font-size: 22px; font-weight: 700; color: var(--text-1); letter-spacing: -0.02em; }
+        .stat-card .lbl { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+        .stat-card.err .num { color: var(--red); }
+        .stat-card.warn .num { color: var(--amber); }
+
+        /* ── Log table ── */
+        .log-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .log-table th { text-align: left; color: var(--text-3); font-weight: 500; padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .log-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); color: var(--text-1); font-family: 'Geist Mono', 'Fira Code', monospace; vertical-align: middle; font-size: 12px; }
+        .log-table tr:hover td { background: var(--bg-elevated); }
+
+        /* ── Activity feed ── */
+        .act-feed { display: flex; flex-direction: column; }
+        .act-card {
+            display: flex; align-items: center; gap: 12px;
+            padding: 10px 12px; border-radius: 8px; transition: background 0.18s;
+        }
+        .act-card:hover { background: var(--bg-elevated); }
+        .act-card + .act-card { border-top: 1px solid var(--border); }
+        .act-body { flex: 1; min-width: 0; }
+        .act-action { font-size: 13px; font-weight: 600; color: var(--text-1); margin-bottom: 2px; }
+        .act-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+        .act-who { font-size: 11px; color: var(--text-2); font-family: 'Geist Mono', monospace; }
+        .act-time { font-size: 11px; color: var(--text-3); }
+        .act-page { font-size: 11px; color: var(--text-2); font-family: 'Geist Mono', monospace; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--bg-elevated); padding: 1px 6px; border-radius: 4px; }
+        .act-detail { font-size: 11px; color: var(--text-2); }
+        .act-status-ok  { font-size: 13px; color: var(--green); flex-shrink: 0; }
+        .act-status-err { font-size: 13px; color: var(--red); flex-shrink: 0; }
+
+        /* ── Activity thumbnail ── */
+        .act-thumb-wrap {
+            width: 108px; height: 68px; flex-shrink: 0; border-radius: 8px;
+            overflow: hidden; position: relative; background: var(--bg-elevated);
+            border: 1px solid var(--border-md); cursor: pointer; display: block;
+        }
+        .act-thumb-inner { width: 1080px; height: 680px; transform: scale(0.1); transform-origin: top left; pointer-events: none; }
+        .act-thumb-overlay {
+            position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+            background: rgba(26,24,22,0.45); opacity: 0; transition: opacity 0.18s;
+            text-decoration: none; font-size: 16px; color: #fff;
+        }
+        .act-thumb-wrap:hover .act-thumb-overlay { opacity: 1; }
+        .act-thumb-placeholder {
+            width: 108px; height: 68px; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; gap: 4px;
+            font-size: 10px; color: var(--text-3); text-align: center; padding: 6px;
+        }
+        .act-url-preview {
+            width: 108px; height: 68px; display: flex; flex-direction: column;
+            align-items: flex-start; justify-content: center; padding: 8px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-md); border-radius: 8px; overflow: hidden;
+            text-decoration: none; gap: 3px; transition: border-color 0.18s;
+        }
+        .act-url-preview:hover { border-color: var(--text-2); }
+        .act-url-preview .url-path {
+            font-size: 10px; color: var(--text-1); font-family: 'Geist Mono', monospace; font-weight: 600;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 92px;
+        }
+        .act-url-preview .url-domain {
+            font-size: 9px; color: var(--text-3); font-family: 'Geist Mono', monospace;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 92px;
+        }
+        .sc-2xx { color: var(--green); }
+        .sc-4xx { color: var(--amber); }
+        .sc-5xx { color: var(--red); }
+        .err-detail { color: var(--text-2); font-size: 11px; }
+
+        /* ── Empty / loading ── */
+        .log-empty { text-align: center; color: var(--text-3); padding: 32px; font-size: 13px; }
+        .refresh-btn {
+            float: right; padding: 4px 12px; font-size: 11px; border-radius: 6px;
+            background: var(--bg-elevated); border: 1px solid var(--border-md); color: var(--text-2);
+            cursor: pointer; font-family: inherit; transition: background 0.18s;
+        }
+        .refresh-btn:hover { background: var(--bg-muted); color: var(--text-1); }
+
+        /* ── Persona filter bar ── */
+        #persona-filter-bar {
+            background: var(--bg-elevated); border: 1px solid var(--border-md);
+            border-radius: var(--radius-card); padding: 10px 16px; margin-bottom: 16px;
+            align-items: center; gap: 10px;
+        }
+    </style>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>Tenera Persona Tracking</h1>
-            <div class="subtitle">Open-source persona tracking &amp; cohort analytics</div>
-        </header>
+<div class="container">
+    <header>
+        <h1>Tenera Persona Tracking</h1>
+        <div class="subtitle">Open-source persona data collection</div>
+    </header>
 
-        <div class="grid">
+    <!-- ── Tab bar ── -->
+    <div class="tabs">
+        <button class="tab active" onclick="switchTab('personas')">Personas</button>
+        <button class="tab" onclick="switchTab('logs')">Behavior Log</button>
+    </div>
+
+    <!-- ── Personas tab ── -->
+    <div id="tab-personas" class="tab-panel active">
+        <div class="grid" style="margin-bottom: 24px;">
             <div class="card">
                 <h2>Personas</h2>
                 <div class="stat" id="persona-count">--</div>
                 <div class="stat-label">Total tracked personas</div>
             </div>
             <div class="card">
-                <h2>Latest Clustering</h2>
-                <div class="stat" id="cluster-count">--</div>
-                <div class="stat-label" id="cluster-algo">No runs yet</div>
-                <div class="metric-row" id="cluster-metrics"></div>
-            </div>
-        </div>
-
-        <div class="card" style="margin-bottom: 24px;">
-            <h2>Clustering</h2>
-            <div class="actions">
-                <button class="btn btn-primary" onclick="runClustering('kmeans')">Run K-Means</button>
-                <button class="btn" onclick="runClustering('hdbscan')">Run HDBSCAN</button>
-                <button class="btn" onclick="runClustering('kprototypes')">Run K-Prototypes</button>
-            </div>
-            <div id="status"></div>
-        </div>
-
-        <div class="card" style="margin-bottom: 24px;">
-            <h2>Cluster Assignments</h2>
-            <div id="assignments-container">
-                <div class="empty">Run a clustering to see results</div>
-            </div>
-        </div>
-
-        <div class="card" style="margin-bottom: 24px;">
-            <h2>Personas</h2>
-            <div id="personas-container">
-                <div class="empty">Loading...</div>
+                <h2>Sessions</h2>
+                <div class="stat" id="session-count">--</div>
+                <div class="stat-label">Recorded sessions</div>
             </div>
         </div>
 
         <div class="card">
-            <h2>Run History</h2>
-            <div id="history-container">
-                <div class="empty">No clustering runs yet</div>
-            </div>
+            <h2>Tracked Personas</h2>
+            <div id="personas-container"><div class="empty">Loading...</div></div>
         </div>
     </div>
 
-    <script>
-        const API_KEY = 'demo-api-key-2024';
-        const headers = { 'X-API-Key': API_KEY, 'Content-Type': 'application/json' };
+    <!-- ── Behavior Log tab ── -->
+    <div id="tab-logs" class="tab-panel">
 
-        async function fetchJSON(path, opts = {}) {
-            const resp = await fetch(path, { headers, ...opts });
-            if (!resp.ok) return null;
-            if (resp.status === 204) return null;
-            return resp.json();
+        <!-- Active persona filter banner -->
+        <div id="persona-filter-bar" style="display:none;">
+            <span style="font-size:13px;color:var(--text-2);">Filtered by persona:</span>
+            <strong id="persona-filter-label" style="font-size:13px;color:var(--text-1);"></strong>
+            <button onclick="clearPersonaFilter()" style="margin-left:auto;background:none;border:1px solid var(--border-md);color:var(--text-2);border-radius:6px;padding:2px 10px;cursor:pointer;font-size:12px;font-family:inherit;">&#x2715; Clear</button>
+        </div>
+
+        <!-- Stats -->
+        <div class="stats-row" id="log-stats-row">
+            <div class="stat-card"><div class="num" id="ls-total">--</div><div class="lbl">Actions (24h)</div></div>
+            <div class="stat-card"><div class="num" id="ls-saved">--</div><div class="lbl">Saved (24h)</div></div>
+            <div class="stat-card warn"><div class="num" id="ls-failed-actions">--</div><div class="lbl">Failed (24h)</div></div>
+            <div class="stat-card"><div class="num" id="ls-rate">--</div><div class="lbl">Success rate</div></div>
+            <div class="stat-card err"><div class="num" id="ls-failed">--</div><div class="lbl">Batch failures (24h)</div></div>
+        </div>
+
+        <!-- Failed actions -->
+        <div class="card" style="margin-bottom: 16px;">
+            <h2>
+                Failed actions
+                <button class="refresh-btn" onclick="loadLogs()">↺ Refresh</button>
+            </h2>
+            <div id="errors-container"><div class="log-empty">Loading...</div></div>
+        </div>
+
+        <!-- All recent activity -->
+        <div class="card" style="margin-bottom: 16px;">
+            <h2>Recent activity <span style="font-size:12px;color:var(--text-3);font-weight:400">(last 100)</span></h2>
+            <div id="activity-container"><div class="log-empty">Loading...</div></div>
+        </div>
+
+        <!-- Failed events -->
+        <div class="card">
+            <h2>Batch failures</h2>
+            <div id="failed-container"><div class="log-empty">Loading...</div></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const API_KEY = '{{ api_key }}';
+    const WRITE_KEY = '{{ write_key }}';
+    const headers = { 'X-API-Key': API_KEY, 'Content-Type': 'application/json' };
+
+    function switchTab(name) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        document.querySelector(`.tab[onclick*="${name}"]`).classList.add('active');
+        document.getElementById(`tab-${name}`).classList.add('active');
+        if (name === 'logs') loadLogs();
+    }
+
+    async function fetchJSON(path, opts = {}) {
+        const resp = await fetch(path, { headers, ...opts });
+        if (!resp.ok) return null;
+        if (resp.status === 204) return null;
+        return resp.json();
+    }
+
+    // ── Personas ───────────────────────────────────────────────────────────────
+
+    async function loadPersonas() {
+        const [personas, sessions] = await Promise.all([
+            fetchJSON('/api/v1/personas?limit=200'),
+            fetchJSON('/api/v1/sessions?limit=1'),
+        ]);
+
+        if (personas) {
+            document.getElementById('persona-count').textContent = personas.count;
+            renderPersonas(personas.results);
         }
 
-        async function loadDashboard() {
-            // Personas
-            const personas = await fetchJSON('/api/v1/personas?limit=200');
-            if (personas) {
-                document.getElementById('persona-count').textContent = personas.count;
-                renderPersonas(personas.results);
-            }
+        if (sessions !== null) {
+            // sessions endpoint returns an array; use personas count as proxy if no total
+            document.getElementById('session-count').textContent =
+                Array.isArray(sessions) ? sessions.length + (sessions.length === 1 ? '' : '') : '--';
+        }
+    }
 
-            // Latest cluster run
-            const latest = await fetchJSON('/api/v1/clusters/latest');
-            if (latest) {
-                document.getElementById('cluster-count').textContent = latest.num_clusters + ' clusters';
-                document.getElementById('cluster-algo').textContent =
-                    latest.algorithm + ' · ' + latest.num_personas + ' personas · ' + latest.created_at.slice(0, 16);
+    function renderPersonas(personas) {
+        const el = document.getElementById('personas-container');
+        if (!personas.length) { el.innerHTML = '<div class="empty">No personas yet</div>'; return; }
+        let html = '<table><thead><tr><th>Distinct ID</th><th>Name</th><th>Entities</th><th>Created</th><th></th></tr></thead><tbody>';
+        for (const p of personas) {
+            const entities = (p.entities || []).map(e => `<span class="badge badge-blue">${e.key}=${e.value}</span>`).join(' ');
+            const did = p.distinct_id.replace(/'/g, "\\'");
+            const exact = fmtTime(p.created_at);
+            html += `<tr>
+                <td><strong>${p.distinct_id}</strong></td>
+                <td>${p.name || '--'}</td>
+                <td>${entities}</td>
+                <td title="${exact}">${timeAgo(p.created_at)}</td>
+                <td><button class="refresh-btn" onclick="filterByPersona('${did}')" title="View behavior log">&#x1F50D;</button></td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        el.innerHTML = html;
+    }
 
-                // Metrics
-                const metricsEl = document.getElementById('cluster-metrics');
-                metricsEl.innerHTML = '';
-                if (latest.silhouette_score) {
-                    metricsEl.innerHTML += `<div class="metric"><div class="metric-value">${latest.silhouette_score}</div><div class="metric-label">Silhouette</div></div>`;
+    // ── Logs ───────────────────────────────────────────────────────────────────
+
+    function timeAgo(iso) {
+        const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+        if (s < 5)    return 'just now';
+        if (s < 60)   return `${s}s ago`;
+        const m = Math.floor(s / 60);
+        if (m < 60)   return `${m}m ago`;
+        const h = Math.floor(m / 60);
+        if (h < 24)   return `${h}h ago`;
+        return `${Math.floor(h / 24)}d ago`;
+    }
+
+    function fmtTime(iso) {
+        const d = new Date(iso);
+        return d.toLocaleTimeString() + ' ' + d.toLocaleDateString();
+    }
+
+    function humanizeEventType(raw) {
+        // Convert snake_case event types to readable labels
+        const map = {
+            'page_view': 'Viewed page',
+            'pageview': 'Viewed page',
+            'click': 'Clicked',
+            'form_submit': 'Submitted form',
+            'form_fill': 'Filled form',
+            'input': 'Typed input',
+            'scroll': 'Scrolled',
+            'search': 'Searched',
+            'purchase': 'Purchased',
+            'signup': 'Signed up',
+            'login': 'Logged in',
+            'logout': 'Logged out',
+            'download': 'Downloaded',
+            'video_play': 'Played video',
+            'video_pause': 'Paused video',
+            'error': 'Encountered error',
+        };
+        return map[raw] || raw.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function friendlyAction(action, meta) {
+        if (action === 'identify')        return 'Profile updated';
+        if (action === 'alias')           return 'Merged identity';
+        if (action === 'record_session')  return 'Screen activity';
+        if (action === 'capture_memory') {
+            // Use the real event type stored in metadata, fall back gracefully
+            const evt = meta && meta.event_type;
+            return evt ? humanizeEventType(evt) : 'Behavior logged';
+        }
+        if (action.startsWith('track:'))  return humanizeEventType(action.slice(6));
+        return action;
+    }
+
+    function fmtDetail(action, meta) {
+        if (!meta) return '';
+        const parts = [];
+        if (action === 'identify') {
+            if (meta.name) parts.push(`<strong>${meta.name}</strong>`);
+            if (meta.properties && meta.properties.length)
+                parts.push(meta.properties.map(k => `<span class="badge badge-blue">${k}</span>`).join(' '));
+        } else if (action === 'alias') {
+            if (meta.anon_id) parts.push(`from ${meta.anon_id}`);
+            if (meta.events_moved) parts.push(`${meta.events_moved} events moved`);
+        } else if (action === 'record_session') {
+            if (meta.url) parts.push(`<span class="err-detail" title="${meta.url}">${meta.url.replace(/^https?:\/\/[^/]+/, '').slice(0, 40) || '/'}</span>`);
+            if (meta.clicks) parts.push(`${meta.clicks} click${meta.clicks !== 1 ? 's' : ''}`);
+            if (meta.keypresses) parts.push(`${meta.keypresses} keypress${meta.keypresses !== 1 ? 'es' : ''}`);
+        } else if (action === 'capture_memory') {
+            if (meta.title) parts.push(`<em>${meta.title.slice(0, 40)}</em>`);
+            if (meta.url) parts.push(`<span class="err-detail" title="${meta.url}">${meta.url.replace(/^https?:\/\/[^/]+/, '').slice(0, 40) || '/'}</span>`);
+        } else if (action.startsWith('track:')) {
+            const keys = ['url', 'title', 'text', 'element', 'page', 'href', 'label'];
+            for (const k of keys) {
+                if (meta[k]) {
+                    const v = String(meta[k]);
+                    parts.push(`<span class="badge badge-blue">${k}:</span> ${v.slice(0, 50)}`);
+                    if (parts.length >= 2) break;
                 }
-                if (latest.davies_bouldin) {
-                    metricsEl.innerHTML += `<div class="metric"><div class="metric-value">${latest.davies_bouldin}</div><div class="metric-label">Davies-Bouldin</div></div>`;
-                }
-
-                renderAssignments(latest.assignments, latest.cluster_summaries || {});
-            }
-
-            // History
-            const runs = await fetchJSON('/api/v1/clusters/runs');
-            if (runs && runs.length > 0) renderHistory(runs);
-        }
-
-        function renderPersonas(personas) {
-            const el = document.getElementById('personas-container');
-            if (!personas.length) { el.innerHTML = '<div class="empty">No personas yet</div>'; return; }
-
-            let html = '<table><thead><tr><th>Distinct ID</th><th>Name</th><th>Entities</th><th>Created</th></tr></thead><tbody>';
-            for (const p of personas) {
-                const entities = (p.entities || []).map(e => `<span class="badge badge-blue">${e.key}=${e.value}</span>`).join(' ');
-                html += `<tr><td><strong>${p.distinct_id}</strong></td><td>${p.name || '--'}</td><td>${entities}</td><td>${p.created_at.slice(0,10)}</td></tr>`;
-            }
-            html += '</tbody></table>';
-            el.innerHTML = html;
-        }
-
-        function renderAssignments(assignments, summaries) {
-            const el = document.getElementById('assignments-container');
-            if (!assignments || !assignments.length) { el.innerHTML = '<div class="empty">No assignments</div>'; return; }
-
-            // Group by cluster
-            const groups = {};
-            for (const a of assignments) {
-                const key = a.cluster_label;
-                if (!groups[key]) groups[key] = { name: a.cluster_name, members: [] };
-                groups[key].members.push(a);
-            }
-
-            const colors = ['badge-blue', 'badge-green', 'badge-yellow', 'badge-purple'];
-            let html = '';
-            for (const [label, group] of Object.entries(groups)) {
-                const color = colors[Math.abs(parseInt(label)) % colors.length];
-                const clusterLlm = summaries && summaries[String(label)];
-                const summary = clusterLlm && (typeof clusterLlm === 'object' ? clusterLlm.summary : clusterLlm);
-                html += `<div class="cluster-group">`;
-                html += `<h3><span class="badge ${color}">${group.name}</span> <span class="cluster-count">${group.members.length} personas</span></h3>`;
-                if (summary) {
-                    html += `<div class="cluster-summary">${summary}</div>`;
-                }
-                html += '<table><thead><tr><th>Distinct ID</th><th>Name</th></tr></thead><tbody>';
-                for (const m of group.members) {
-                    html += `<tr><td>${m.distinct_id || '--'}</td><td>${m.persona_name || '--'}</td></tr>`;
-                }
-                html += '</tbody></table></div>';
-            }
-            el.innerHTML = html;
-        }
-
-        function renderHistory(runs) {
-            const el = document.getElementById('history-container');
-            let html = '<table><thead><tr><th>Time</th><th>Algorithm</th><th>Clusters</th><th>Personas</th><th>Silhouette</th></tr></thead><tbody>';
-            for (const r of runs) {
-                html += `<tr><td>${r.created_at.slice(0,16)}</td><td><span class="badge badge-purple">${r.algorithm}</span></td><td>${r.num_clusters}</td><td>${r.num_personas}</td><td>${r.silhouette_score || '--'}</td></tr>`;
-            }
-            html += '</tbody></table>';
-            el.innerHTML = html;
-        }
-
-        async function runClustering(algo) {
-            document.getElementById('status').textContent = `Running ${algo}...`;
-            const resp = await fetchJSON('/api/v1/clusters/run', {
-                method: 'POST',
-                body: JSON.stringify({ algorithm: algo }),
-            });
-            if (resp) {
-                document.getElementById('status').textContent =
-                    `Done: ${resp.num_clusters} clusters found (silhouette: ${resp.metrics?.silhouette_score || 'N/A'})`;
-                loadDashboard();
-            } else {
-                document.getElementById('status').textContent = 'Clustering failed — check server logs';
             }
         }
+        return parts.join(' &nbsp;');
+    }
 
-        loadDashboard();
-    </script>
+    // ── Thumbnail rendering ────────────────────────────────────────────────────
+
+    const _sessionCache = {};
+
+    async function _fetchSessionEvents(sessionId) {
+        if (_sessionCache[sessionId]) return _sessionCache[sessionId];
+        const r = await fetch(`/api/v1/sessions/${sessionId}/events`, { headers });
+        if (!r.ok) return null;
+        const data = await r.json();
+        const events = data.events || [];
+        if (events.length >= 2) _sessionCache[sessionId] = events;
+        return events.length >= 2 ? events : null;
+    }
+
+    async function loadActivityThumbnails(rows) {
+        if (!window.rrwebPlayer) return;
+        for (const r of rows) {
+            const meta = r.metadata;
+            if (!meta || !meta.session_id) continue;
+            const el = document.getElementById(`act-thumb-${r.id}`);
+            if (!el || el.dataset.loaded) continue;
+            el.dataset.loaded = '1';
+
+            const events = await _fetchSessionEvents(meta.session_id);
+            if (!events) {
+                el.innerHTML = '<div class="act-thumb-placeholder">no preview</div>';
+                continue;
+            }
+
+            // Exact offset from capture_memory; for batch track events compute from event timestamp.
+            let offsetMs = meta.replay_offset_ms;
+            if (offsetMs == null && meta.event_ts) {
+                const sessionStartMs = Math.min(...events.map(e => e.timestamp).filter(Boolean));
+                const eventTsMs = new Date(meta.event_ts).getTime();
+                offsetMs = Math.max(0, eventTsMs - sessionStartMs);
+            }
+            offsetMs = offsetMs || 0;
+
+            el.innerHTML = '';
+            try {
+                const player = new rrwebPlayer({
+                    target: el,
+                    props: { events, width: 1080, height: 680,
+                             autoPlay: false, showController: false, skipInactive: false },
+                });
+                const replayUrl = `/replay/${meta.session_id}?t=${offsetMs}`;
+                el.closest('.act-thumb-wrap').querySelector('.act-thumb-overlay').href = replayUrl;
+                setTimeout(() => {
+                    try { player.goto(offsetMs); player.pause(); } catch(e) {}
+                }, 300);
+            } catch(e) {
+                el.innerHTML = '<div class="act-thumb-placeholder">preview unavailable</div>';
+            }
+        }
+    }
+
+    function fmtPage(meta) {
+        if (!meta || !meta.url) return '--';
+        try {
+            const u = new URL(meta.url);
+            return u.pathname || '/';
+        } catch(_) {
+            return meta.url.replace(/^https?:\/\/[^/]+/, '') || meta.url;
+        }
+    }
+
+    function fmtDomain(meta) {
+        if (!meta || !meta.url) return '';
+        try { return new URL(meta.url).hostname; } catch(_) { return ''; }
+    }
+
+    function renderThumb(r) {
+        const meta = r.metadata;
+        const hasSession = meta && meta.session_id;
+        const hasUrl = meta && meta.url;
+
+        if (hasSession) {
+            return `<div class="act-thumb-wrap">
+                <div class="act-thumb-inner" id="act-thumb-${r.id}">
+                    <div class="act-thumb-placeholder">loading…</div>
+                </div>
+                <a class="act-thumb-overlay" href="#" target="_blank">&#9654;</a>
+            </div>`;
+        }
+        if (hasUrl) {
+            const path = fmtPage(meta).slice(0, 18) || '/';
+            const domain = fmtDomain(meta);
+            return `<a class="act-url-preview" href="${meta.url}" target="_blank" title="${meta.url}">
+                <div class="url-domain">${domain}</div>
+                <div class="url-path">${path}</div>
+            </a>`;
+        }
+        const icon = { identify: '&#x1F464;', alias: '&#x1F517;', record_session: '&#x25B6;' }[r.action] || '&#x22EF;';
+        return `<div class="act-thumb-placeholder">${icon}</div>`;
+    }
+
+    function renderActivityTable(rows, containerId, failedOnly) {
+        const el = document.getElementById(containerId);
+        if (!rows || !rows.length) {
+            el.innerHTML = `<div class="log-empty">${failedOnly ? 'No failed actions ✓' : 'No activity yet'}</div>`;
+            return;
+        }
+        let html = '<div class="act-feed">';
+        for (const r of rows) {
+            const label   = friendlyAction(r.action, r.metadata);
+            const detail  = fmtDetail(r.action, r.metadata);
+            const page    = fmtPage(r.metadata);
+            const pageUrl = r.metadata && r.metadata.url || '';
+            const ago     = timeAgo(r.created_at);
+            const exact   = fmtTime(r.created_at);
+            const statusIcon = r.saved
+                ? `<span class="act-status-ok"  title="Saved">&#10003;</span>`
+                : `<span class="act-status-err" title="${r.error || 'Failed'}">&#10007;</span>`;
+            html += `<div class="act-card">
+                <div style="width:108px;flex-shrink:0">${renderThumb(r)}</div>
+                <div class="act-body">
+                    <div class="act-action" title="${r.action}">${label}</div>
+                    <div class="act-meta">
+                        <span class="act-who">${r.distinct_id}</span>
+                        <span class="act-time" title="${exact}">${ago}</span>
+                        ${page !== '--' ? `<span class="act-page" title="${pageUrl}">${page}</span>` : ''}
+                    </div>
+                    ${detail ? `<div class="act-detail" style="margin-top:3px">${detail}</div>` : ''}
+                    ${!r.saved && r.error ? `<div class="act-detail sc-5xx" style="margin-top:2px">${r.error}</div>` : ''}
+                </div>
+                ${statusIcon}
+            </div>`;
+        }
+        html += '</div>';
+        el.innerHTML = html;
+        requestAnimationFrame(() => loadActivityThumbnails(rows));
+    }
+
+    function renderFailedEvents(rows) {
+        const el = document.getElementById('failed-container');
+        if (!rows || !rows.length) {
+            el.innerHTML = '<div class="log-empty">No batch failures ✓</div>';
+            return;
+        }
+        let html = `<table class="log-table"><thead><tr>
+            <th>Time</th><th>Distinct ID</th><th>Event type</th><th>Error</th><th>Payload</th>
+        </tr></thead><tbody>`;
+        for (const e of rows) {
+            let payload = '';
+            try { payload = JSON.stringify(JSON.parse(e.payload_json), null, 0); } catch (_) { payload = e.payload_json; }
+            html += `<tr>
+                <td>${fmtTime(e.created_at)}</td>
+                <td>${e.distinct_id}</td>
+                <td>${e.event_type}</td>
+                <td class="sc-5xx">${e.error_message}</td>
+                <td class="err-detail" title="${payload.replace(/"/g,'&quot;')}">${payload.slice(0, 80)}${payload.length > 80 ? '…' : ''}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        el.innerHTML = html;
+    }
+
+    let activePersonaFilter = null;
+
+    function filterByPersona(distinctId) {
+        activePersonaFilter = distinctId;
+        document.getElementById('persona-filter-label').textContent = distinctId;
+        document.getElementById('persona-filter-bar').style.display = 'flex';
+        switchTab('logs');
+    }
+
+    function clearPersonaFilter() {
+        activePersonaFilter = null;
+        document.getElementById('persona-filter-bar').style.display = 'none';
+        loadLogs();
+    }
+
+    async function loadLogs() {
+        const didParam = activePersonaFilter
+            ? `&distinct_id=${encodeURIComponent(activePersonaFilter)}`
+            : '';
+
+        const [stats, activity, failed_actions, failed] = await Promise.all([
+            fetchJSON('/api/v1/logs/stats'),
+            fetchJSON(`/api/v1/logs/activity?limit=100${didParam}`),
+            fetchJSON(`/api/v1/logs/activity?limit=50&saved=false${didParam}`),
+            fetchJSON('/api/v1/logs/failed-events?limit=50'),
+        ]);
+
+        if (stats) {
+            document.getElementById('ls-total').textContent = stats.total_24h.toLocaleString();
+            document.getElementById('ls-saved').textContent = stats.saved_24h.toLocaleString();
+            document.getElementById('ls-failed-actions').textContent = stats.failed_24h.toLocaleString();
+            document.getElementById('ls-rate').textContent = (stats.success_rate_24h * 100).toFixed(1) + '%';
+            document.getElementById('ls-failed').textContent = stats.failed_events_24h.toLocaleString();
+        }
+
+        renderActivityTable(failed_actions, 'errors-container', true);
+        renderActivityTable(activity, 'activity-container', false);
+        renderFailedEvents(failed);
+    }
+
+    loadPersonas();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/rrweb@1/dist/rrweb.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/rrweb-player@latest/dist/index.js"></script>
 </body>
 </html>
