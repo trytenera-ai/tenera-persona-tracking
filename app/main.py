@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -37,6 +38,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(api_router)
 
 # Mount static files and templates for minimal UI
@@ -53,6 +61,11 @@ from fastapi import Request
 @app.get("/")
 async def dashboard(request: Request):
     return templates.TemplateResponse(request, "dashboard.html")
+
+
+@app.get("/test")
+async def test_page(request: Request):
+    return templates.TemplateResponse(request, "test-integration.html")
 
 
 @app.get("/health")

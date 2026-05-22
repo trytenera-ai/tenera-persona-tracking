@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tenera Analytics — Integration Test</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Geist:wght@300..900&family=Playfair+Display:ital,wght@0,400;0,600;1,400&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Geist', system-ui, sans-serif; background: #F5F3EE; color: #1A1816; padding: 32px 24px; font-size: 14px; }
+  h1 { font-family: 'Playfair Display', serif; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 4px; }
+  .subtitle { font-size: 13px; color: #9C9690; margin-bottom: 32px; }
+  .card { background: #FAF9F5; border: 1px solid rgba(26,24,22,0.08); border-radius: 11px; padding: 20px; margin-bottom: 16px; max-width: 700px; }
+  .card h2 { font-size: 11px; font-weight: 600; color: #9C9690; text-transform: uppercase; letter-spacing: 0.7px; margin-bottom: 16px; }
+  .row { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  input, select { padding: 7px 10px; border: 1px solid rgba(26,24,22,0.15); border-radius: 8px; background: #F5F3EE; color: #1A1816; font-family: inherit; font-size: 13px; flex: 1; min-width: 120px; }
+  button { padding: 7px 14px; border-radius: 8px; border: 1px solid rgba(26,24,22,0.15); background: #1A1816; color: #FAF9F5; font-size: 13px; font-family: inherit; cursor: pointer; white-space: nowrap; }
+  button:hover { background: #000; }
+  button.secondary { background: #FAF9F5; color: #1A1816; }
+  button.secondary:hover { background: #F0EDE8; }
+  #log { font-family: 'Geist Mono', monospace; font-size: 12px; max-height: 300px; overflow-y: auto; }
+  .log-entry { padding: 6px 10px; border-bottom: 1px solid rgba(26,24,22,0.06); display: flex; gap: 10px; }
+  .log-entry:last-child { border-bottom: none; }
+  .log-time { color: #9C9690; flex-shrink: 0; }
+  .log-ok   { color: #16A34A; }
+  .log-err  { color: #DC2626; }
+  .log-info { color: #6B6560; }
+  .stat-row { display: flex; gap: 24px; margin-top: 4px; }
+  .stat { text-align: center; }
+  .stat-val { font-size: 28px; font-weight: 700; letter-spacing: -0.03em; }
+  .stat-lbl { font-size: 11px; color: #9C9690; text-transform: uppercase; letter-spacing: 0.5px; }
+  a.btn { display: inline-block; padding: 7px 14px; border-radius: 8px; border: 1px solid rgba(26,24,22,0.15); background: #FAF9F5; color: #1A1816; font-size: 13px; text-decoration: none; }
+  a.btn:hover { background: #F0EDE8; }
+</style>
+</head>
+<body>
+<h1>Tenera Analytics</h1>
+<p class="subtitle">Integration test — fires real events to Railway, verifies they land</p>
+
+<div class="card">
+  <h2>Target</h2>
+  <div class="row">
+    <input id="baseUrl" value="https://tenera-persona-tracking-production.up.railway.app" style="flex:3">
+    <input id="apiKey" value="tpt-prod-5949936f706ed73cefa3cb90" placeholder="API Key" style="flex:2">
+  </div>
+  <div class="row">
+    <a class="btn" href="https://tenera-persona-tracking-production.up.railway.app" target="_blank">Open Dashboard ↗</a>
+    <button class="secondary" onclick="checkHealth()">Health Check</button>
+    <button class="secondary" onclick="listPersonas()">List Personas</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Send Events</h2>
+  <div class="row">
+    <input id="distinctId" value="demo-user-1" placeholder="distinct_id">
+    <input id="eventType" value="page_view" placeholder="event_type">
+    <input id="eventPage" value="/features" placeholder="page property">
+    <button onclick="trackEvent()">Track Event</button>
+  </div>
+  <div class="row">
+    <button class="secondary" onclick="runBurst()">Burst (10 events)</button>
+    <button class="secondary" onclick="runJourney()">Simulate Journey</button>
+    <button class="secondary" onclick="clearLog()">Clear Log</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Live Stats</h2>
+  <div class="stat-row">
+    <div class="stat"><div class="stat-val" id="statPersonas">—</div><div class="stat-lbl">Personas</div></div>
+    <div class="stat"><div class="stat-val" id="statEvents">—</div><div class="stat-lbl">Events Sent</div></div>
+    <div class="stat"><div class="stat-val" id="statOk">—</div><div class="stat-lbl">OK</div></div>
+    <div class="stat"><div class="stat-val" id="statErr">0</div><div class="stat-lbl">Errors</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Event Log</h2>
+  <div id="log"><div class="log-entry"><span class="log-info log-time">ready</span><span class="log-info">Waiting for events…</span></div></div>
+</div>
+
+<script>
+let sentCount = 0, okCount = 0, errCount = 0;
+
+function base() { return document.getElementById('baseUrl').value.replace(/\/$/, ''); }
+function key()  { return document.getElementById('apiKey').value; }
+function headers() { return { 'Content-Type': 'application/json', 'X-API-Key': key() }; }
+
+function ts() {
+  return new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function addLog(msg, cls = 'log-info') {
+  const log = document.getElementById('log');
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  entry.innerHTML = `<span class="log-time">${ts()}</span><span class="${cls}">${msg}</span>`;
+  log.prepend(entry);
+  // keep max 100 entries
+  while (log.children.length > 100) log.removeChild(log.lastChild);
+}
+
+function clearLog() {
+  document.getElementById('log').innerHTML = '';
+}
+
+async function checkHealth() {
+  try {
+    const r = await fetch(`${base()}/health`);
+    const d = await r.json();
+    addLog(`Health: ${JSON.stringify(d)}`, r.ok ? 'log-ok' : 'log-err');
+  } catch(e) { addLog(`Health check failed: ${e.message}`, 'log-err'); }
+}
+
+async function listPersonas() {
+  try {
+    const r = await fetch(`${base()}/api/v1/personas`, { headers: headers() });
+    const d = await r.json();
+    document.getElementById('statPersonas').textContent = d.count ?? d.results?.length ?? '?';
+    addLog(`Personas: ${d.count} total — ${d.results?.map(p => p.name || p.distinct_id).join(', ') || 'none'}`, 'log-ok');
+  } catch(e) { addLog(`List failed: ${e.message}`, 'log-err'); }
+}
+
+async function trackEvent(overrides = {}) {
+  const distinctId = overrides.distinctId || document.getElementById('distinctId').value;
+  const eventType  = overrides.eventType  || document.getElementById('eventType').value;
+  const page       = overrides.page       || document.getElementById('eventPage').value;
+
+  sentCount++;
+  document.getElementById('statEvents').textContent = sentCount;
+
+  try {
+    const r = await fetch(`${base()}/api/v1/track?distinct_id=${encodeURIComponent(distinctId)}`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ event_type: eventType, properties: { page, source: 'integration-test', ts: new Date().toISOString() } })
+    });
+    const d = await r.json();
+    if (r.ok) {
+      okCount++;
+      document.getElementById('statOk').textContent = okCount;
+      addLog(`✓ ${eventType} for ${distinctId} → id=${d.id?.slice(0,8)}…`, 'log-ok');
+    } else {
+      errCount++;
+      document.getElementById('statErr').textContent = errCount;
+      addLog(`✗ ${r.status}: ${JSON.stringify(d)}`, 'log-err');
+    }
+  } catch(e) {
+    errCount++;
+    document.getElementById('statErr').textContent = errCount;
+    addLog(`✗ ${e.message}`, 'log-err');
+  }
+}
+
+async function runBurst() {
+  addLog('Starting burst of 10 events…', 'log-info');
+  const events = ['page_view','button_click','form_submit','page_view','feature_used',
+                  'page_view','upgrade_prompt','page_view','button_click','session_end'];
+  const pages = ['/dashboard','/personas','/interviews','/settings','/billing'];
+  for (let i = 0; i < events.length; i++) {
+    await trackEvent({
+      distinctId: document.getElementById('distinctId').value,
+      eventType: events[i],
+      page: pages[i % pages.length]
+    });
+    await new Promise(r => setTimeout(r, 150));
+  }
+  await listPersonas();
+  addLog('Burst complete.', 'log-info');
+}
+
+async function runJourney() {
+  const users = ['alice@example.com', 'bob@example.com', 'carol@example.com'];
+  const journey = [
+    { e: 'signup',       p: '/onboarding' },
+    { e: 'page_view',    p: '/dashboard' },
+    { e: 'feature_used', p: '/personas' },
+    { e: 'upgrade_prompt', p: '/billing' },
+    { e: 'page_view',    p: '/settings' },
+  ];
+  addLog(`Simulating journey for ${users.length} users…`, 'log-info');
+  for (const user of users) {
+    for (const step of journey) {
+      await trackEvent({ distinctId: user, eventType: step.e, page: step.p });
+      await new Promise(r => setTimeout(r, 100));
+    }
+  }
+  await listPersonas();
+  addLog('Journey simulation complete. Refresh dashboard to see clusters.', 'log-ok');
+}
+
+// Auto-run health check on load
+window.onload = async () => {
+  await checkHealth();
+  await listPersonas();
+};
+</script>
+</body>
+</html>
