@@ -4,7 +4,6 @@ WORKDIR /app
 
 COPY pyproject.toml .
 COPY app/ ./app/
-COPY sdk/ ./sdk/
 COPY README.md .
 
 RUN pip install --no-cache-dir -e .
