@@ -7,14 +7,17 @@ from app.models import Base
 
 _connect_args: dict = {}
 if settings.database_mode == "supabase":
-    # Supabase requires SSL; asyncpg needs an ssl context rather than a string
-    _ssl_ctx = ssl.create_default_context()
-    _ssl_ctx.check_hostname = False
-    _ssl_ctx.verify_mode = ssl.CERT_NONE
-    _connect_args = {
-        "ssl": _ssl_ctx,
-        "server_settings": {"search_path": settings.db_schema},
-    }
+    server_settings: dict = {}
+    if settings.db_schema != "public":
+        server_settings["search_path"] = settings.db_schema
+    if settings.db_ssl:
+        # Supabase requires SSL; asyncpg needs an ssl context rather than a string
+        _ssl_ctx = ssl.create_default_context()
+        _ssl_ctx.check_hostname = False
+        _ssl_ctx.verify_mode = ssl.CERT_NONE
+        _connect_args["ssl"] = _ssl_ctx
+    if server_settings:
+        _connect_args["server_settings"] = server_settings
 
 engine = create_async_engine(
     settings.effective_database_url,

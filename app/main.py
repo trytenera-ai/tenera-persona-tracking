@@ -14,8 +14,8 @@ _APP_DIR = Path(__file__).resolve().parent
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create tables on startup (SQLite dev mode)
-    if settings.database_mode == "sqlite":
+    # Create tables on startup (SQLite and Railway Postgres without external migration runner)
+    if settings.database_mode == "sqlite" or not settings.db_ssl:
         await init_db()
 
     # Start the clustering scheduler

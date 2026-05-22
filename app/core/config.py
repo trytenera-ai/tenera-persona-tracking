@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     supabase_url: Optional[str] = None
     supabase_service_key: Optional[str] = None
     db_schema: str = "public"  # Postgres search_path; use "staging" or "dev" for non-prod
+    db_ssl: bool = True  # Set to false for Railway-internal PostgreSQL (no TLS needed)
 
     # Auth
     api_key: str = "change-me-in-production"
