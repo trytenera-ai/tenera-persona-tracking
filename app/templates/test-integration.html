@@ -40,13 +40,16 @@
 <div class="card">
   <h2>Target</h2>
   <div class="row">
-    <input id="baseUrl" value="https://tenera-persona-tracking-production.up.railway.app" style="flex:3">
-    <input id="apiKey" value="tpt-prod-5949936f706ed73cefa3cb90" placeholder="API Key" style="flex:2">
+    <input id="baseUrl" value="http://localhost:8000" style="flex:3">
+    <input id="apiKey" value="tpt-dev-api-key" placeholder="API Key" style="flex:2">
+    <input id="railwayUrl" value="https://tenera-persona-tracking-production.up.railway.app" placeholder="Railway URL" style="flex:3; display:none">
+
   </div>
   <div class="row">
-    <a class="btn" href="https://tenera-persona-tracking-production.up.railway.app" target="_blank">Open Dashboard ↗</a>
+    <a class="btn" id="dashLink" href="http://localhost:8000" target="_blank">Open Dashboard ↗</a>
     <button class="secondary" onclick="checkHealth()">Health Check</button>
     <button class="secondary" onclick="listPersonas()">List Personas</button>
+    <button class="secondary" onclick="switchTarget()">Switch Target</button>
   </div>
 </div>
 
@@ -188,6 +191,26 @@ async function runJourney() {
   }
   await listPersonas();
   addLog('Journey simulation complete. Refresh dashboard to see clusters.', 'log-ok');
+}
+
+function switchTarget() {
+  const urlInput = document.getElementById('baseUrl');
+  const keyInput = document.getElementById('apiKey');
+  const link = document.getElementById('dashLink');
+  const isLocal = urlInput.value.includes('localhost');
+  if (isLocal) {
+    urlInput.value = 'https://tenera-persona-tracking-production.up.railway.app';
+    keyInput.value = 'tpt-prod-5949936f706ed73cefa3cb90';
+    link.href = 'https://tenera-persona-tracking-production.up.railway.app';
+    link.textContent = 'Open Railway Dashboard ↗';
+    addLog('Switched to Railway production', 'log-info');
+  } else {
+    urlInput.value = 'http://localhost:8000';
+    keyInput.value = 'tpt-dev-api-key';
+    link.href = 'http://localhost:8000';
+    link.textContent = 'Open Local Dashboard ↗';
+    addLog('Switched to localhost:8000', 'log-info');
+  }
 }
 
 // Auto-run health check on load

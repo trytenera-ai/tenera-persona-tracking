@@ -31,5 +31,6 @@ class Event(Base):
     timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )
+    screenshot_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     persona: Mapped["Persona"] = relationship("Persona", back_populates="events")

@@ -35,6 +35,7 @@ class EventCreate(BaseModel):
     timestamp: Optional[datetime] = Field(
         default=None, description="ISO 8601 timestamp. Defaults to now if omitted."
     )
+    screenshot: Optional[str] = Field(default=None, description="Base64-encoded PNG screenshot")
 
 
 class EventResponse(BaseModel):
@@ -42,6 +43,7 @@ class EventResponse(BaseModel):
     event_type: str
     properties: Optional[Dict] = None
     timestamp: datetime
+    screenshot_url: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

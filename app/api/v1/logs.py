@@ -79,6 +79,7 @@ async def get_activity(
             "saved": True,
             "error": None,
             "metadata": meta,
+            "screenshot_url": e.screenshot_url,
         })
     return result
 

@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import json
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -7,12 +9,36 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import verify_api_key
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.event import Event
 from app.models.persona import Persona
 from app.schemas.persona import EventCreate, EventResponse
 
 router = APIRouter(tags=["events"], dependencies=[Depends(verify_api_key)])
+
+
+async def upload_screenshot(b64: str) -> Optional[str]:
+    """Upload a base64-encoded PNG to Supabase Storage and return the public URL."""
+    if not settings.supabase_url or not settings.supabase_service_key:
+        return None
+    try:
+        from supabase import create_client  # lazy import
+        img_bytes = base64.b64decode(b64)
+        file_hash = hashlib.sha256(img_bytes).hexdigest()
+        path = f"{file_hash}.png"
+        client = create_client(settings.supabase_url, settings.supabase_service_key)
+        # Check if file already exists by trying to get its public URL
+        existing = client.storage.from_("screenshots").list("", {"search": path})
+        already_exists = any(f.get("name") == path for f in (existing or []))
+        if not already_exists:
+            client.storage.from_("screenshots").upload(
+                path, img_bytes, {"content-type": "image/png", "upsert": "false"}
+            )
+        public_url = client.storage.from_("screenshots").get_public_url(path)
+        return public_url
+    except Exception:
+        return None
 
 
 @router.post("/track", response_model=EventResponse, status_code=201)
@@ -26,6 +52,10 @@ async def track_event(
     This is the primary ingestion endpoint — similar to PostHog's /capture.
     If the persona doesn't exist yet, it will be created automatically.
     """
+    screenshot_url: Optional[str] = None
+    if body.screenshot:
+        screenshot_url = await upload_screenshot(body.screenshot)
+
     # Find or create persona by distinct_id
     result = await db.execute(select(Persona).where(Persona.distinct_id == distinct_id))
     persona = result.scalar_one_or_none()
@@ -39,6 +69,7 @@ async def track_event(
         event_type=body.event_type,
         properties=json.dumps(body.properties) if body.properties else None,
         timestamp=body.timestamp or datetime.now(timezone.utc),
+        screenshot_url=screenshot_url,
     )
     db.add(event)
     await db.commit()
@@ -83,4 +114,5 @@ def _event_to_response(event: Event) -> EventResponse:
         event_type=event.event_type,
         properties=props,
         timestamp=event.timestamp,
+        screenshot_url=event.screenshot_url,
     )
