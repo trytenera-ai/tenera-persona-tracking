@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     # Supabase (optional, for direct Supabase client usage)
     supabase_url: Optional[str] = None
     supabase_service_key: Optional[str] = None
+    db_schema: str = "public"  # Postgres search_path; use "staging" or "dev" for non-prod
 
     # Auth
     api_key: str = "change-me-in-production"

@@ -11,7 +11,10 @@ if settings.database_mode == "supabase":
     _ssl_ctx = ssl.create_default_context()
     _ssl_ctx.check_hostname = False
     _ssl_ctx.verify_mode = ssl.CERT_NONE
-    _connect_args = {"ssl": _ssl_ctx}
+    _connect_args = {
+        "ssl": _ssl_ctx,
+        "server_settings": {"search_path": settings.db_schema},
+    }
 
 engine = create_async_engine(
     settings.effective_database_url,
