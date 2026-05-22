@@ -423,6 +423,13 @@
                 <div class="url-path">${path}</div>
             </a>`;
         }
+        const page = meta && (meta.page || meta.path || meta.route);
+        if (page) {
+            return `<div class="act-url-preview" title="${page}">
+                <div class="url-domain" style="font-size:9px;opacity:0.5">page</div>
+                <div class="url-path">${page.slice(0, 18)}</div>
+            </div>`;
+        }
         const icon = { identify: '&#x1F464;', alias: '&#x1F517;', record_session: '&#x25B6;' }[r.action] || '&#x22EF;';
         return `<div class="act-thumb-placeholder">${icon}</div>`;
     }
