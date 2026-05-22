@@ -109,6 +109,17 @@
             border-radius: var(--radius-card); padding: 10px 16px; margin-bottom: 16px;
             align-items: center; gap: 10px;
         }
+
+        /* ── User filter select ── */
+        .user-filter-row { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+        .user-filter-row label { font-size: 12px; color: var(--text-3); white-space: nowrap; }
+        #user-filter-select {
+            flex: 1; max-width: 320px; padding: 5px 10px; font-size: 12px;
+            font-family: 'Geist Mono', monospace; border-radius: 6px;
+            background: var(--bg-elevated); border: 1px solid var(--border-md);
+            color: var(--text-1); cursor: pointer;
+        }
+        #user-filter-select:focus { outline: none; border-color: var(--text-2); }
     </style>
 </head>
 <body>
@@ -148,11 +159,12 @@
     <!-- ── Action Log tab ── -->
     <div id="tab-logs" class="tab-panel">
 
-        <!-- Active persona filter banner -->
-        <div id="persona-filter-bar" style="display:none;">
-            <span style="font-size:13px;color:var(--text-2);">Filtered by persona:</span>
-            <strong id="persona-filter-label" style="font-size:13px;color:var(--text-1);"></strong>
-            <button onclick="clearPersonaFilter()" style="margin-left:auto;background:none;border:1px solid var(--border-md);color:var(--text-2);border-radius:6px;padding:2px 10px;cursor:pointer;font-size:12px;font-family:inherit;">&#x2715; Clear</button>
+        <!-- User filter dropdown -->
+        <div class="user-filter-row">
+            <label for="user-filter-select">Filter by user</label>
+            <select id="user-filter-select" onchange="onUserFilterChange(this.value)">
+                <option value="">All users</option>
+            </select>
         </div>
 
         <!-- Stats -->
@@ -218,6 +230,7 @@
         if (personas) {
             document.getElementById('persona-count').textContent = personas.count;
             renderPersonas(personas.results);
+            populateUserFilter(personas.results);
         }
 
         if (sessions !== null) {
@@ -500,17 +513,30 @@
 
     let activePersonaFilter = null;
 
-    function filterByPersona(distinctId) {
-        activePersonaFilter = distinctId;
-        document.getElementById('persona-filter-label').textContent = distinctId;
-        document.getElementById('persona-filter-bar').style.display = 'flex';
-        switchTab('logs');
+    function populateUserFilter(personas) {
+        const sel = document.getElementById('user-filter-select');
+        const prev = sel.value;
+        // keep existing "All users" option, rebuild the rest
+        sel.innerHTML = '<option value="">All users</option>';
+        for (const p of personas) {
+            const opt = document.createElement('option');
+            opt.value = p.distinct_id;
+            opt.textContent = p.distinct_id;
+            sel.appendChild(opt);
+        }
+        if (prev) sel.value = prev;
     }
 
-    function clearPersonaFilter() {
-        activePersonaFilter = null;
-        document.getElementById('persona-filter-bar').style.display = 'none';
+    function onUserFilterChange(val) {
+        activePersonaFilter = val || null;
         loadLogs();
+    }
+
+    function filterByPersona(distinctId) {
+        activePersonaFilter = distinctId;
+        const sel = document.getElementById('user-filter-select');
+        if (sel) sel.value = distinctId;
+        switchTab('logs');
     }
 
     async function loadLogs() {

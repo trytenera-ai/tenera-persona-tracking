@@ -21,7 +21,11 @@ router = APIRouter(tags=["events"])
 
 async def upload_screenshot(b64: str) -> Optional[str]:
     """Upload a base64-encoded PNG to Supabase Storage and return the public URL."""
+    import logging
+    _log = logging.getLogger(__name__)
+
     if not settings.supabase_url or not settings.supabase_service_key:
+        _log.warning("upload_screenshot: SUPABASE_URL or SUPABASE_SERVICE_KEY not set — skipping")
         return None
     try:
         from supabase import create_client  # lazy import
@@ -29,7 +33,6 @@ async def upload_screenshot(b64: str) -> Optional[str]:
         file_hash = hashlib.sha256(img_bytes).hexdigest()
         path = f"{file_hash}.png"
         client = create_client(settings.supabase_url, settings.supabase_service_key)
-        # Check if file already exists by trying to get its public URL
         existing = client.storage.from_("screenshots").list("", {"search": path})
         already_exists = any(f.get("name") == path for f in (existing or []))
         if not already_exists:
@@ -37,8 +40,10 @@ async def upload_screenshot(b64: str) -> Optional[str]:
                 path, img_bytes, {"content-type": "image/png", "upsert": "false"}
             )
         public_url = client.storage.from_("screenshots").get_public_url(path)
+        _log.info("upload_screenshot: saved %s → %s", path, public_url)
         return public_url
-    except Exception:
+    except Exception as exc:
+        _log.error("upload_screenshot failed: %s", exc)
         return None
 
 
