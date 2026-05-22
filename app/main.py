@@ -60,7 +60,7 @@ from fastapi import Request
 
 @app.get("/")
 async def dashboard(request: Request):
-    return templates.TemplateResponse(request, "dashboard.html")
+    return templates.TemplateResponse(request, "dashboard.html", {"api_key": settings.api_key})
 
 
 @app.get("/test")
