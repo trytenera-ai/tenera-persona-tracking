@@ -75,6 +75,7 @@ async def get_activity(
             "action": e.event_type,
             "distinct_id": e.persona.distinct_id if e.persona else None,
             "timestamp": e.timestamp.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z",
+            "created_at": e.timestamp.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z",
             "saved": True,
             "error": None,
             "metadata": meta,
