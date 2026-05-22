@@ -42,7 +42,7 @@
   <div class="row">
     <input id="baseUrl" value="http://localhost:8000" style="flex:3">
     <input id="apiKey" value="tpt-dev-api-key" placeholder="API Key" style="flex:2">
-    <input id="railwayUrl" value="https://tenera-persona-tracking-production.up.railway.app" placeholder="Railway URL" style="flex:3; display:none">
+    <input id="railwayUrl" value="" placeholder="Railway URL" style="flex:3; display:none">
 
   </div>
   <div class="row">
@@ -199,9 +199,9 @@ function switchTarget() {
   const link = document.getElementById('dashLink');
   const isLocal = urlInput.value.includes('localhost');
   if (isLocal) {
-    urlInput.value = 'https://tenera-persona-tracking-production.up.railway.app';
-    keyInput.value = 'tpt-prod-5949936f706ed73cefa3cb90';
-    link.href = 'https://tenera-persona-tracking-production.up.railway.app';
+    urlInput.value = 'https://your-railway-app.up.railway.app';
+    keyInput.value = '';
+    link.href = 'https://your-railway-app.up.railway.app';
     link.textContent = 'Open Railway Dashboard ↗';
     addLog('Switched to Railway production', 'log-info');
   } else {
