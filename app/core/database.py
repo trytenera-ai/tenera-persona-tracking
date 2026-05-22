@@ -31,19 +31,20 @@ async def init_db():
     """Create all tables. Used for SQLite local dev — Supabase uses Alembic migrations."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # Add screenshot_url column if it doesn't exist (idempotent on Postgres)
-        try:
-            await conn.exec_driver_sql(
-                "ALTER TABLE events ADD COLUMN IF NOT EXISTS screenshot_url TEXT"
-            )
-        except Exception:
-            # SQLite doesn't support IF NOT EXISTS — try without it
+        # Add columns that may be missing from older schema versions (idempotent)
+        for stmt_pg, stmt_sqlite in [
+            (
+                "ALTER TABLE events ADD COLUMN IF NOT EXISTS screenshot_url TEXT",
+                "ALTER TABLE events ADD COLUMN screenshot_url TEXT",
+            ),
+        ]:
             try:
-                await conn.exec_driver_sql(
-                    "ALTER TABLE events ADD COLUMN screenshot_url TEXT"
-                )
+                await conn.exec_driver_sql(stmt_pg)
             except Exception:
-                pass  # column already exists
+                try:
+                    await conn.exec_driver_sql(stmt_sqlite)
+                except Exception:
+                    pass
 
 
 async def get_db():

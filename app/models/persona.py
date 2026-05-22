@@ -8,6 +8,7 @@ from app.models.base import Base, TimestampMixin, generate_uuid
 if TYPE_CHECKING:
     from app.models.entity import Entity
     from app.models.event import Event
+    from app.models.session import Session
 
 
 class Persona(Base, TimestampMixin):
@@ -30,4 +31,7 @@ class Persona(Base, TimestampMixin):
     )
     events: Mapped[List["Event"]] = relationship(
         "Event", back_populates="persona", cascade="all, delete-orphan", lazy="selectin"
+    )
+    sessions: Mapped[List["Session"]] = relationship(
+        "Session", back_populates="persona", cascade="all, delete-orphan"
     )

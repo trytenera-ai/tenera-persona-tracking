@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Session Replay · Tenera</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/rrweb-player@latest/dist/style.css">
+  <style>
+    body { background: var(--bg-base); display: flex; flex-direction: column; align-items: center; padding: 32px 16px; min-height: 100vh; }
+    .replay-header { width: 100%; max-width: 1100px; display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+    .replay-header a { font-size: 12px; color: var(--text-3); text-decoration: none; }
+    .replay-header a:hover { color: var(--text-1); }
+    .replay-header h2 { font-size: 15px; font-weight: 600; color: var(--text-1); }
+    #player-wrap { width: 100%; max-width: 1100px; }
+    #loading { color: var(--text-3); font-size: 13px; text-align: center; padding: 48px; }
+  </style>
+</head>
+<body>
+  <div class="replay-header">
+    <a href="/">&larr; Dashboard</a>
+    <h2>Session Replay</h2>
+    <span style="font-size:11px;color:var(--text-3);font-family:monospace">{{ session_id }}</span>
+  </div>
+  <div id="player-wrap">
+    <div id="loading">Loading session…</div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/rrweb-player@latest/dist/index.js"></script>
+  <script>
+    const SESSION_ID = '{{ session_id }}';
+    const API_KEY    = '{{ api_key }}';
+    const startAt    = parseInt(new URLSearchParams(location.search).get('t') || '0', 10);
+
+    fetch(`/api/v1/sessions/${SESSION_ID}/events`, {
+      headers: { 'X-API-Key': API_KEY }
+    })
+      .then(r => r.json())
+      .then(({ events }) => {
+        document.getElementById('loading').remove();
+        if (!events || events.length < 2) {
+          document.getElementById('player-wrap').innerHTML =
+            '<p style="color:var(--text-3);text-align:center;padding:48px">Not enough events to replay yet.</p>';
+          return;
+        }
+        const player = new rrwebPlayer({
+          target: document.getElementById('player-wrap'),
+          props: {
+            events,
+            width: Math.min(window.innerWidth - 32, 1100),
+            height: Math.round(Math.min(window.innerWidth - 32, 1100) * 0.625),
+            autoPlay: true,
+            showController: true,
+            skipInactive: true,
+          },
+        });
+        if (startAt > 0) {
+          setTimeout(() => { try { player.goto(startAt); } catch(e) {} }, 400);
+        }
+      })
+      .catch(() => {
+        document.getElementById('loading').textContent = 'Failed to load session events.';
+      });
+  </script>
+</body>
+</html>

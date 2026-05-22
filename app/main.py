@@ -68,6 +68,13 @@ async def test_page(request: Request):
     return templates.TemplateResponse(request, "test-integration.html")
 
 
+@app.get("/replay/{session_id}")
+async def replay_session(request: Request, session_id: str):
+    return templates.TemplateResponse(
+        request, "replay.html", {"session_id": session_id, "api_key": settings.api_key}
+    )
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
