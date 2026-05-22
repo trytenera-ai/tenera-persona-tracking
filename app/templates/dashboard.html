@@ -121,7 +121,7 @@
     <!-- ── Tab bar ── -->
     <div class="tabs">
         <button class="tab active" onclick="switchTab('personas')">Personas</button>
-        <button class="tab" onclick="switchTab('logs')">Behavior Log</button>
+        <button class="tab" onclick="switchTab('logs')">Action Log</button>
     </div>
 
     <!-- ── Personas tab ── -->
@@ -145,7 +145,7 @@
         </div>
     </div>
 
-    <!-- ── Behavior Log tab ── -->
+    <!-- ── Action Log tab ── -->
     <div id="tab-logs" class="tab-panel">
 
         <!-- Active persona filter banner -->
@@ -240,7 +240,7 @@
                 <td>${p.name || '--'}</td>
                 <td>${entities}</td>
                 <td title="${exact}">${timeAgo(p.created_at)}</td>
-                <td><button class="refresh-btn" onclick="filterByPersona('${did}')" title="View behavior log">&#x1F50D;</button></td>
+                <td><button class="refresh-btn" onclick="filterByPersona('${did}')" title="View action log">&#x1F50D;</button></td>
             </tr>`;
         }
         html += '</tbody></table>';
