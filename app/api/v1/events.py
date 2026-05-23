@@ -20,31 +20,38 @@ router = APIRouter(tags=["events"])
 
 
 async def upload_screenshot(b64: str) -> Optional[str]:
-    """Upload a base64-encoded PNG to Supabase Storage and return the public URL."""
+    """Upload a base64-encoded image to Supabase Storage and return the public URL.
+
+    Falls back to storing as a data URL when Supabase Storage is not configured,
+    so thumbnails always show in the dashboard regardless of infra setup.
+    SHA-256 dedup avoids storing the same image twice in Supabase Storage.
+    """
     import logging
     _log = logging.getLogger(__name__)
 
     if not settings.supabase_url or not settings.supabase_service_key:
-        _log.warning("upload_screenshot: SUPABASE_URL or SUPABASE_SERVICE_KEY not set — skipping")
-        return None
+        # No Supabase configured — store inline as a data URL so the dashboard
+        # can still render the thumbnail via <img src="data:image/jpeg;base64,...">
+        _log.debug("upload_screenshot: no Supabase credentials, storing as data URL")
+        return f"data:image/jpeg;base64,{b64}"
     try:
         from supabase import create_client  # lazy import
         img_bytes = base64.b64decode(b64)
         file_hash = hashlib.sha256(img_bytes).hexdigest()
-        path = f"{file_hash}.png"
+        path = f"{file_hash}.jpg"
         client = create_client(settings.supabase_url, settings.supabase_service_key)
         existing = client.storage.from_("screenshots").list("", {"search": path})
         already_exists = any(f.get("name") == path for f in (existing or []))
         if not already_exists:
             client.storage.from_("screenshots").upload(
-                path, img_bytes, {"content-type": "image/png", "upsert": "false"}
+                path, img_bytes, {"content-type": "image/jpeg", "upsert": "false"}
             )
         public_url = client.storage.from_("screenshots").get_public_url(path)
         _log.info("upload_screenshot: saved %s → %s", path, public_url)
         return public_url
     except Exception as exc:
-        _log.error("upload_screenshot failed: %s", exc)
-        return None
+        _log.error("upload_screenshot failed: %s — falling back to data URL", exc)
+        return f"data:image/jpeg;base64,{b64}"
 
 
 @router.post("/track", response_model=EventResponse, status_code=201)
