@@ -120,6 +120,47 @@
             color: var(--text-1); cursor: pointer;
         }
         #user-filter-select:focus { outline: none; border-color: var(--text-2); }
+
+        /* ── Screenshot modal ── */
+        .sc-modal-backdrop {
+            display: none; position: fixed; inset: 0; z-index: 9999;
+            background: rgba(0,0,0,0.75); align-items: center; justify-content: center;
+            cursor: pointer;
+        }
+        .sc-modal-backdrop.open { display: flex; }
+        .sc-modal-img { max-width: min(90vw, 1100px); max-height: 85vh; border-radius: 10px; box-shadow: 0 8px 40px rgba(0,0,0,0.5); cursor: default; display: block; }
+        .sc-modal-close {
+            position: absolute; top: -14px; right: -14px; width: 28px; height: 28px;
+            border-radius: 50%; background: var(--bg-surface); border: 1px solid var(--border-md);
+            cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center;
+            color: var(--text-1); line-height: 1;
+        }
+        .sc-modal-close:hover { background: var(--bg-elevated); }
+
+        /* ── View Session button ── */
+        .view-session-btn {
+            font-size: 11px; color: var(--text-2); text-decoration: none;
+            border: 1px solid var(--border-md); border-radius: 5px; padding: 3px 9px;
+            white-space: nowrap; background: var(--bg-elevated); font-family: inherit;
+            transition: border-color 0.15s, color 0.15s; cursor: pointer;
+        }
+        .view-session-btn:hover { color: var(--text-1); border-color: var(--text-2); }
+
+        /* ── Session ID badge ── */
+        .act-session-badge {
+            font-size: 10px; color: var(--text-3); font-family: 'Geist Mono', monospace;
+            background: var(--bg-elevated); padding: 1px 5px; border-radius: 3px;
+            border: 1px solid var(--border); letter-spacing: 0.02em;
+        }
+
+        /* ── Card right-side actions ── */
+        .act-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+        /* ── Clickable screenshot thumb ── */
+        .sc-thumb { width: 108px; height: 68px; object-fit: cover; border-radius: 6px;
+            border: 1px solid rgba(0,0,0,0.08); cursor: zoom-in; display: block;
+            transition: opacity 0.15s; }
+        .sc-thumb:hover { opacity: 0.85; }
     </style>
 </head>
 <body>
@@ -344,61 +385,19 @@
         return parts.join(' &nbsp;');
     }
 
+    // ── Screenshot modal ──────────────────────────────────────────────────────
+
+    function openScModal(url) {
+        document.getElementById('sc-modal-img').src = url;
+        document.getElementById('sc-modal').classList.add('open');
+    }
+    function closeScModal() {
+        document.getElementById('sc-modal').classList.remove('open');
+        document.getElementById('sc-modal-img').src = '';
+    }
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeScModal(); });
+
     // ── Thumbnail rendering ────────────────────────────────────────────────────
-
-    const _sessionCache = {};
-
-    async function _fetchSessionEvents(sessionId) {
-        if (_sessionCache[sessionId]) return _sessionCache[sessionId];
-        const r = await fetch(`/api/v1/sessions/${sessionId}/events`, { headers });
-        if (!r.ok) return null;
-        const data = await r.json();
-        const events = data.events || [];
-        if (events.length >= 2) _sessionCache[sessionId] = events;
-        return events.length >= 2 ? events : null;
-    }
-
-    async function loadActivityThumbnails(rows) {
-        if (!window.rrwebPlayer) return;
-        for (const r of rows) {
-            const meta = r.metadata;
-            if (!meta || !meta.session_id) continue;
-            const el = document.getElementById(`act-thumb-${r.id}`);
-            if (!el || el.dataset.loaded) continue;
-            el.dataset.loaded = '1';
-
-            const events = await _fetchSessionEvents(meta.session_id);
-            if (!events) {
-                el.innerHTML = '<div class="act-thumb-placeholder">no preview</div>';
-                continue;
-            }
-
-            // Exact offset from capture_memory; for batch track events compute from event timestamp.
-            let offsetMs = meta.replay_offset_ms;
-            if (offsetMs == null && meta.event_ts) {
-                const sessionStartMs = Math.min(...events.map(e => e.timestamp).filter(Boolean));
-                const eventTsMs = new Date(meta.event_ts).getTime();
-                offsetMs = Math.max(0, eventTsMs - sessionStartMs);
-            }
-            offsetMs = offsetMs || 0;
-
-            el.innerHTML = '';
-            try {
-                const player = new rrwebPlayer({
-                    target: el,
-                    props: { events, width: 1080, height: 680,
-                             autoPlay: false, showController: false, skipInactive: false },
-                });
-                const replayUrl = `/replay/${meta.session_id}?t=${offsetMs}`;
-                el.closest('.act-thumb-wrap').querySelector('.act-thumb-overlay').href = replayUrl;
-                setTimeout(() => {
-                    try { player.goto(offsetMs); player.pause(); } catch(e) {}
-                }, 300);
-            } catch(e) {
-                el.innerHTML = '<div class="act-thumb-placeholder">preview unavailable</div>';
-            }
-        }
-    }
 
     function fmtPage(meta) {
         if (!meta || !meta.url) return '--';
@@ -417,27 +416,20 @@
 
     function renderThumb(r) {
         const meta = r.metadata;
-        const hasSession = meta && meta.session_id;
         const hasUrl = meta && meta.url;
 
         if (r.screenshot_url) {
-            return `<img src="${r.screenshot_url}" style="width:108px;height:68px;object-fit:cover;border-radius:6px;border:1px solid rgba(0,0,0,0.08);" loading="lazy">`;
-        }
-        if (hasSession) {
-            return `<div class="act-thumb-wrap">
-                <div class="act-thumb-inner" id="act-thumb-${r.id}">
-                    <div class="act-thumb-placeholder">loading…</div>
-                </div>
-                <a class="act-thumb-overlay" href="#" target="_blank">&#9654;</a>
-            </div>`;
+            const esc = r.screenshot_url.replace(/'/g, "\\'");
+            return `<img class="sc-thumb" src="${r.screenshot_url}" loading="lazy"
+                onclick="openScModal('${esc}')" title="Click to enlarge">`;
         }
         if (hasUrl) {
             const path = fmtPage(meta).slice(0, 18) || '/';
             const domain = fmtDomain(meta);
-            return `<a class="act-url-preview" href="${meta.url}" target="_blank" title="${meta.url}">
+            return `<div class="act-url-preview" title="${meta.url}">
                 <div class="url-domain">${domain}</div>
                 <div class="url-path">${path}</div>
-            </a>`;
+            </div>`;
         }
         const page = meta && (meta.page || meta.path || meta.route);
         if (page) {
@@ -458,15 +450,19 @@
         }
         let html = '<div class="act-feed">';
         for (const r of rows) {
-            const label   = friendlyAction(r.action, r.metadata);
-            const detail  = fmtDetail(r.action, r.metadata);
-            const page    = fmtPage(r.metadata);
-            const pageUrl = r.metadata && r.metadata.url || '';
-            const ago     = timeAgo(r.created_at);
-            const exact   = fmtTime(r.created_at);
+            const label     = friendlyAction(r.action, r.metadata);
+            const detail    = fmtDetail(r.action, r.metadata);
+            const page      = fmtPage(r.metadata);
+            const pageUrl   = r.metadata && r.metadata.url || '';
+            const sessionId = r.metadata && r.metadata.session_id;
+            const ago       = timeAgo(r.created_at);
+            const exact     = fmtTime(r.created_at);
             const statusIcon = r.saved
                 ? `<span class="act-status-ok"  title="Saved">&#10003;</span>`
                 : `<span class="act-status-err" title="${r.error || 'Failed'}">&#10007;</span>`;
+            const viewSessionBtn = sessionId
+                ? `<a class="view-session-btn" href="/replay/${sessionId}" target="_blank">View Session</a>`
+                : '';
             html += `<div class="act-card">
                 <div style="width:108px;flex-shrink:0">${renderThumb(r)}</div>
                 <div class="act-body">
@@ -475,16 +471,19 @@
                         <span class="act-who">${r.distinct_id}</span>
                         <span class="act-time" title="${exact}">${ago}</span>
                         ${page !== '--' ? `<span class="act-page" title="${pageUrl}">${page}</span>` : ''}
+                        ${sessionId ? `<span class="act-session-badge" title="Session ${sessionId}">${sessionId.slice(0, 8)}</span>` : ''}
                     </div>
                     ${detail ? `<div class="act-detail" style="margin-top:3px">${detail}</div>` : ''}
                     ${!r.saved && r.error ? `<div class="act-detail sc-5xx" style="margin-top:2px">${r.error}</div>` : ''}
                 </div>
-                ${statusIcon}
+                <div class="act-actions">
+                    ${viewSessionBtn}
+                    ${statusIcon}
+                </div>
             </div>`;
         }
         html += '</div>';
         el.innerHTML = html;
-        requestAnimationFrame(() => loadActivityThumbnails(rows));
     }
 
     function renderFailedEvents(rows) {
@@ -566,7 +565,14 @@
 
     loadPersonas();
 </script>
-<script src="https://cdn.jsdelivr.net/npm/rrweb@1/dist/rrweb.min.js"></script>
+<!-- Screenshot modal -->
+<div id="sc-modal" class="sc-modal-backdrop" onclick="closeScModal()">
+    <div style="position:relative" onclick="event.stopPropagation()">
+        <img id="sc-modal-img" class="sc-modal-img" src="" alt="Screenshot">
+        <button class="sc-modal-close" onclick="closeScModal()">&#x2715;</button>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/rrweb-player@latest/dist/index.js"></script>
 </body>
 </html>
