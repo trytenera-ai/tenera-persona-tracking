@@ -121,21 +121,40 @@
         }
         #user-filter-select:focus { outline: none; border-color: var(--text-2); }
 
-        /* ── Screenshot modal ── */
+        /* ── Page preview modal ── */
         .sc-modal-backdrop {
             display: none; position: fixed; inset: 0; z-index: 9999;
             background: rgba(0,0,0,0.75); align-items: center; justify-content: center;
             cursor: pointer;
         }
         .sc-modal-backdrop.open { display: flex; }
-        .sc-modal-img { max-width: min(90vw, 1100px); max-height: 85vh; border-radius: 10px; box-shadow: 0 8px 40px rgba(0,0,0,0.5); cursor: default; display: block; }
-        .sc-modal-close {
-            position: absolute; top: -14px; right: -14px; width: 28px; height: 28px;
-            border-radius: 50%; background: var(--bg-surface); border: 1px solid var(--border-md);
-            cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center;
-            color: var(--text-1); line-height: 1;
+        .sc-modal-inner {
+            position: relative; cursor: default; display: flex; flex-direction: column;
+            border-radius: 10px; overflow: hidden; box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+            width: min(92vw, 1200px);
         }
-        .sc-modal-close:hover { background: var(--bg-elevated); }
+        .sc-modal-header {
+            background: #1a1816; padding: 8px 12px; display: flex; align-items: center;
+            gap: 10px; min-height: 38px; flex-shrink: 0;
+        }
+        .sc-modal-url {
+            flex: 1; font-size: 11px; font-family: 'Geist Mono', monospace;
+            color: #999; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .sc-modal-open-btn {
+            font-size: 11px; color: #ccc; text-decoration: none; white-space: nowrap;
+            background: rgba(255,255,255,0.08); padding: 3px 9px; border-radius: 4px;
+            flex-shrink: 0;
+        }
+        .sc-modal-open-btn:hover { background: rgba(255,255,255,0.16); color: #fff; }
+        .sc-modal-close {
+            width: 24px; height: 24px; border-radius: 50%; background: rgba(255,255,255,0.08);
+            border: none; cursor: pointer; font-size: 13px; display: flex; align-items: center;
+            justify-content: center; color: #ccc; line-height: 1; flex-shrink: 0;
+        }
+        .sc-modal-close:hover { background: rgba(255,255,255,0.18); color: #fff; }
+        .sc-modal-iframe { width: 100%; height: 72vh; border: none; background: #fff; display: block; }
+        .sc-modal-img-fallback { max-width: 100%; max-height: 72vh; display: block; }
 
         /* ── View Session button ── */
         .view-session-btn {
@@ -156,11 +175,12 @@
         /* ── Card right-side actions ── */
         .act-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
-        /* ── Clickable screenshot thumb ── */
+        /* ── Clickable thumbnail ── */
         .sc-thumb { width: 108px; height: 68px; object-fit: cover; border-radius: 6px;
             border: 1px solid rgba(0,0,0,0.08); cursor: zoom-in; display: block;
             transition: opacity 0.15s; }
         .sc-thumb:hover { opacity: 0.85; }
+        .act-url-preview { cursor: zoom-in; }
     </style>
 </head>
 <body>
@@ -385,17 +405,40 @@
         return parts.join(' &nbsp;');
     }
 
-    // ── Screenshot modal ──────────────────────────────────────────────────────
+    // ── Page preview modal ────────────────────────────────────────────────────
 
-    function openScModal(url) {
-        document.getElementById('sc-modal-img').src = url;
+    function openModal(pageUrl, screenshotUrl) {
+        const iframe = document.getElementById('sc-modal-iframe');
+        const img    = document.getElementById('sc-modal-img-fallback');
+        const urlEl  = document.getElementById('sc-modal-url');
+        const openBtn = document.getElementById('sc-modal-open-btn');
+
+        if (pageUrl) {
+            iframe.src = pageUrl;
+            iframe.style.display = 'block';
+            img.style.display = 'none';
+            img.src = '';
+            urlEl.textContent = pageUrl;
+            openBtn.href = pageUrl;
+            openBtn.style.display = '';
+        } else if (screenshotUrl) {
+            iframe.src = '';
+            iframe.style.display = 'none';
+            img.src = screenshotUrl;
+            img.style.display = 'block';
+            urlEl.textContent = '';
+            openBtn.style.display = 'none';
+        } else {
+            return;
+        }
         document.getElementById('sc-modal').classList.add('open');
     }
-    function closeScModal() {
+    function closeModal() {
         document.getElementById('sc-modal').classList.remove('open');
-        document.getElementById('sc-modal-img').src = '';
+        document.getElementById('sc-modal-iframe').src = '';
+        document.getElementById('sc-modal-img-fallback').src = '';
     }
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeScModal(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
     // ── Thumbnail rendering ────────────────────────────────────────────────────
 
@@ -415,18 +458,19 @@
     }
 
     function renderThumb(r) {
-        const meta = r.metadata;
-        const hasUrl = meta && meta.url;
+        const meta    = r.metadata;
+        const pageUrl = (meta && (meta.url || '')) || '';
+        const safeUrl = pageUrl.replace(/'/g, '%27');
 
         if (r.screenshot_url) {
-            const esc = r.screenshot_url.replace(/'/g, "\\'");
+            const escSc = r.screenshot_url.replace(/'/g, "\\'");
             return `<img class="sc-thumb" src="${r.screenshot_url}" loading="lazy"
-                onclick="openScModal('${esc}')" title="Click to enlarge">`;
+                onclick="openModal('${safeUrl}', '${escSc}')" title="Click to view page">`;
         }
-        if (hasUrl) {
-            const path = fmtPage(meta).slice(0, 18) || '/';
+        if (pageUrl) {
+            const path   = fmtPage(meta).slice(0, 18) || '/';
             const domain = fmtDomain(meta);
-            return `<div class="act-url-preview" title="${meta.url}">
+            return `<div class="act-url-preview" onclick="openModal('${safeUrl}')" title="Click to view page">
                 <div class="url-domain">${domain}</div>
                 <div class="url-path">${path}</div>
             </div>`;
@@ -565,11 +609,16 @@
 
     loadPersonas();
 </script>
-<!-- Screenshot modal -->
-<div id="sc-modal" class="sc-modal-backdrop" onclick="closeScModal()">
-    <div style="position:relative" onclick="event.stopPropagation()">
-        <img id="sc-modal-img" class="sc-modal-img" src="" alt="Screenshot">
-        <button class="sc-modal-close" onclick="closeScModal()">&#x2715;</button>
+<!-- Page preview modal -->
+<div id="sc-modal" class="sc-modal-backdrop" onclick="closeModal()">
+    <div class="sc-modal-inner" onclick="event.stopPropagation()">
+        <div class="sc-modal-header">
+            <span class="sc-modal-url" id="sc-modal-url"></span>
+            <a class="sc-modal-open-btn" id="sc-modal-open-btn" href="#" target="_blank">Open in tab ↗</a>
+            <button class="sc-modal-close" onclick="closeModal()">&#x2715;</button>
+        </div>
+        <iframe id="sc-modal-iframe" class="sc-modal-iframe" src=""></iframe>
+        <img id="sc-modal-img-fallback" class="sc-modal-img-fallback" src="" alt="Screenshot" style="display:none">
     </div>
 </div>
 
