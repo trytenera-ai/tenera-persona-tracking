@@ -356,7 +356,7 @@
             return evt ? humanizeEventType(evt) : 'Behavior logged';
         }
         if (action.startsWith('track:'))  return humanizeEventType(action.slice(6));
-        return action;
+        return humanizeEventType(action);
     }
 
     function fmtDetail(action, meta) {
@@ -377,22 +377,27 @@
             if (meta.title) parts.push(`<em>${meta.title.slice(0, 40)}</em>`);
             if (meta.url) parts.push(`<span class="err-detail" title="${meta.url}">${meta.url.replace(/^https?:\/\/[^/]+/, '').slice(0, 40) || '/'}</span>`);
         } else if (action === 'click' || (action === 'capture_memory' && meta && meta.event_type === 'click')) {
-            if (meta.text) parts.push(`<strong>"${meta.text.slice(0, 60)}"</strong>`);
+            if (meta.text) {
+                const cleanText = meta.text.trim().replace(/\s+/g, ' ').slice(0, 60);
+                parts.push(`Clicked <strong>"${cleanText}"</strong>`);
+            }
             if (meta.href) {
                 try {
                     const p = new URL(meta.href).pathname;
                     if (p && p !== '/') parts.push(`<span class="err-detail">→ ${p.slice(0, 40)}</span>`);
                 } catch(_) {}
             }
+            if (!meta.text && meta.element) parts.push(`Clicked ${meta.element}`);
         } else if (action === 'form_submit' || (action === 'capture_memory' && meta && meta.event_type === 'form_submit')) {
             if (meta.fields && meta.fields.length)
-                parts.push(`fields: ${meta.fields.slice(0, 5).join(', ')}`);
+                parts.push(`Submitted form with fields: <strong>${meta.fields.slice(0, 5).join(', ')}</strong>`);
+            else parts.push('Submitted form');
             if (meta.form_id) parts.push(`<span class="badge badge-blue">${meta.form_id}</span>`);
         } else if (action === 'time_on_page' || (action === 'capture_memory' && meta && meta.event_type === 'time_on_page')) {
             if (meta.duration_seconds != null) {
                 const s = meta.duration_seconds;
                 const label = s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`;
-                parts.push(`<strong>${label}</strong> on page`);
+                parts.push(`Spent <strong>${label}</strong> on this page`);
             }
         } else if (action.startsWith('track:')) {
             const keys = ['url', 'title', 'text', 'element', 'page', 'href', 'label'];
@@ -431,7 +436,7 @@
         document.getElementById('sc-modal').classList.add('open');
     }
 
-    async function openSessionModal(sessionId) {
+    async function openSessionModal(sessionId, eventTs) {
         const img = document.getElementById('sc-modal-img');
         const playerDiv = document.getElementById('sc-modal-player');
         img.style.display = 'none';
@@ -447,12 +452,17 @@
         }
         const w = Math.min(Math.round(window.innerWidth * 0.9), 1100);
         playerDiv.style.display = 'block';
-        // showController: false — show only the first frame as a static snapshot.
-        // Users who want the full replay can click "View Session".
         _modalPlayer = new rrwebPlayer({
             target: playerDiv,
             props: { events, width: w, height: Math.round(w * 0.625), autoPlay: false, showController: false, skipInactive: false }
         });
+        // Seek to the moment of the event, not just the first frame
+        if (eventTs && events.length) {
+            const offset = Math.max(0, eventTs - events[0].timestamp);
+            if (offset > 0) {
+                setTimeout(() => { try { _modalPlayer.goto(offset); } catch(e) {} }, 150);
+            }
+        }
     }
 
     function closeModal() {
@@ -472,10 +482,17 @@
                 const events = await ensureSessionEvents(el.dataset.session);
                 if (!events) return;
                 el.innerHTML = '';
-                new rrwebPlayer({
+                const player = new rrwebPlayer({
                     target: el,
                     props: { events, width: 1080, height: 680, autoPlay: false, showController: false }
                 });
+                // Seek thumbnail to the moment of this specific event
+                if (el.dataset.ts && events.length) {
+                    const offset = Math.max(0, parseInt(el.dataset.ts, 10) - events[0].timestamp);
+                    if (offset > 0) {
+                        setTimeout(() => { try { player.goto(offset); } catch(e) {} }, 150);
+                    }
+                }
             }
         }, { rootMargin: '300px' });
         document.querySelectorAll('.act-thumb-wrap[data-session]').forEach(el => obs.observe(el));
@@ -501,12 +518,12 @@
     function renderThumb(r) {
         const meta      = r.metadata;
         const sessionId = meta && meta.session_id;
+        const ts        = new Date(r.created_at).getTime();
 
         if (r.screenshot_url) {
             const escSc = r.screenshot_url.replace(/'/g, "\\'");
-            // If there's also a session, clicking shows the session player; else just the image
             const clickFn = sessionId
-                ? `openSessionModal('${sessionId.replace(/'/g, "\\'")}')`
+                ? `openSessionModal('${sessionId.replace(/'/g, "\\'")}',${ts})`
                 : `openImgModal('${escSc}')`;
             return `<img class="sc-thumb" src="${r.screenshot_url}" loading="lazy"
                 onclick="${clickFn}" title="Click to preview">`;
@@ -515,7 +532,8 @@
             const escSid = sessionId.replace(/'/g, "\\'");
             return `<div class="act-thumb-wrap" id="thumb-${r.id}"
                 data-session="${escSid}"
-                onclick="openSessionModal('${escSid}')" title="Click to preview session">
+                data-ts="${ts}"
+                onclick="openSessionModal('${escSid}',${ts})" title="Click to preview session">
               <div class="act-thumb-placeholder">&#x23F3;</div>
             </div>`;
         }
