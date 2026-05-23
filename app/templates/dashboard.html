@@ -57,21 +57,20 @@
 
         /* ── Activity thumbnail ── */
         .act-thumb-wrap {
-            width: 108px; height: 68px; flex-shrink: 0; border-radius: 8px;
+            width: 108px; height: 68px; flex-shrink: 0; border-radius: 6px;
             overflow: hidden; position: relative; background: var(--bg-elevated);
-            border: 1px solid var(--border-md); cursor: pointer; display: block;
+            border: 1px solid rgba(0,0,0,0.08); cursor: zoom-in; display: block;
         }
-        .act-thumb-inner { width: 1080px; height: 680px; transform: scale(0.1); transform-origin: top left; pointer-events: none; }
-        .act-thumb-overlay {
-            position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-            background: rgba(26,24,22,0.45); opacity: 0; transition: opacity 0.18s;
-            text-decoration: none; font-size: 16px; color: #fff;
+        /* rrweb-player inside the thumbnail: render at full size, scale visually to 108×68 */
+        .act-thumb-wrap .rr-player {
+            position: absolute; top: 0; left: 0;
+            transform: scale(0.1); transform-origin: top left;
+            pointer-events: none;
         }
-        .act-thumb-wrap:hover .act-thumb-overlay { opacity: 1; }
         .act-thumb-placeholder {
-            width: 108px; height: 68px; display: flex; flex-direction: column;
+            position: absolute; inset: 0; display: flex; flex-direction: column;
             align-items: center; justify-content: center; gap: 4px;
-            font-size: 10px; color: var(--text-3); text-align: center; padding: 6px;
+            font-size: 9px; color: var(--text-3); text-align: center; padding: 6px;
         }
         .act-url-preview {
             width: 108px; height: 68px; display: flex; flex-direction: column;
@@ -121,7 +120,7 @@
         }
         #user-filter-select:focus { outline: none; border-color: var(--text-2); }
 
-        /* ── Page preview modal ── */
+        /* ── Preview modal ── */
         .sc-modal-backdrop {
             display: none; position: fixed; inset: 0; z-index: 9999;
             background: rgba(0,0,0,0.75); align-items: center; justify-content: center;
@@ -129,32 +128,18 @@
         }
         .sc-modal-backdrop.open { display: flex; }
         .sc-modal-inner {
-            position: relative; cursor: default; display: flex; flex-direction: column;
-            border-radius: 10px; overflow: hidden; box-shadow: 0 8px 40px rgba(0,0,0,0.5);
-            width: min(92vw, 1200px);
+            position: relative; cursor: default; border-radius: 10px; overflow: hidden;
+            box-shadow: 0 8px 40px rgba(0,0,0,0.5); max-width: min(92vw, 1100px);
         }
-        .sc-modal-header {
-            background: #1a1816; padding: 8px 12px; display: flex; align-items: center;
-            gap: 10px; min-height: 38px; flex-shrink: 0;
-        }
-        .sc-modal-url {
-            flex: 1; font-size: 11px; font-family: 'Geist Mono', monospace;
-            color: #999; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-        }
-        .sc-modal-open-btn {
-            font-size: 11px; color: #ccc; text-decoration: none; white-space: nowrap;
-            background: rgba(255,255,255,0.08); padding: 3px 9px; border-radius: 4px;
-            flex-shrink: 0;
-        }
-        .sc-modal-open-btn:hover { background: rgba(255,255,255,0.16); color: #fff; }
         .sc-modal-close {
-            width: 24px; height: 24px; border-radius: 50%; background: rgba(255,255,255,0.08);
-            border: none; cursor: pointer; font-size: 13px; display: flex; align-items: center;
-            justify-content: center; color: #ccc; line-height: 1; flex-shrink: 0;
+            position: absolute; top: 10px; right: 10px; width: 28px; height: 28px;
+            border-radius: 50%; background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.15);
+            cursor: pointer; font-size: 14px; display: flex; align-items: center;
+            justify-content: center; color: #fff; line-height: 1; z-index: 1;
         }
-        .sc-modal-close:hover { background: rgba(255,255,255,0.18); color: #fff; }
-        .sc-modal-iframe { width: 100%; height: 72vh; border: none; background: #fff; display: block; }
-        .sc-modal-img-fallback { max-width: 100%; max-height: 72vh; display: block; }
+        .sc-modal-close:hover { background: rgba(0,0,0,0.8); }
+        .sc-modal-img { max-width: 100%; max-height: 85vh; display: block; border-radius: 10px; }
+        .sc-modal-player { background: var(--bg-base); border-radius: 10px; overflow: hidden; }
 
         /* ── View Session button ── */
         .view-session-btn {
@@ -175,12 +160,11 @@
         /* ── Card right-side actions ── */
         .act-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
-        /* ── Clickable thumbnail ── */
+        /* ── Clickable screenshot thumbnail ── */
         .sc-thumb { width: 108px; height: 68px; object-fit: cover; border-radius: 6px;
             border: 1px solid rgba(0,0,0,0.08); cursor: zoom-in; display: block;
             transition: opacity 0.15s; }
         .sc-thumb:hover { opacity: 0.85; }
-        .act-url-preview { cursor: zoom-in; }
     </style>
 </head>
 <body>
@@ -405,40 +389,77 @@
         return parts.join(' &nbsp;');
     }
 
-    // ── Page preview modal ────────────────────────────────────────────────────
-
-    function openModal(pageUrl, screenshotUrl) {
-        const iframe = document.getElementById('sc-modal-iframe');
-        const img    = document.getElementById('sc-modal-img-fallback');
-        const urlEl  = document.getElementById('sc-modal-url');
-        const openBtn = document.getElementById('sc-modal-open-btn');
-
-        if (pageUrl) {
-            iframe.src = pageUrl;
-            iframe.style.display = 'block';
-            img.style.display = 'none';
-            img.src = '';
-            urlEl.textContent = pageUrl;
-            openBtn.href = pageUrl;
-            openBtn.style.display = '';
-        } else if (screenshotUrl) {
-            iframe.src = '';
-            iframe.style.display = 'none';
-            img.src = screenshotUrl;
-            img.style.display = 'block';
-            urlEl.textContent = '';
-            openBtn.style.display = 'none';
-        } else {
-            return;
+    // ── Session event cache ───────────────────────────────────────────────────
+    const _sessionCache = {};
+    async function ensureSessionEvents(sessionId) {
+        if (!(sessionId in _sessionCache)) {
+            const data = await fetchJSON(`/api/v1/sessions/${sessionId}/events`);
+            _sessionCache[sessionId] = (data && data.events && data.events.length >= 2)
+                ? data.events : null;
         }
+        return _sessionCache[sessionId];
+    }
+
+    // ── Preview modal ─────────────────────────────────────────────────────────
+    let _modalPlayer = null;
+
+    function openImgModal(screenshotUrl) {
+        const img = document.getElementById('sc-modal-img');
+        const playerDiv = document.getElementById('sc-modal-player');
+        img.src = screenshotUrl;
+        img.style.display = 'block';
+        playerDiv.style.display = 'none';
+        if (_modalPlayer) { _modalPlayer = null; playerDiv.innerHTML = ''; }
         document.getElementById('sc-modal').classList.add('open');
     }
+
+    async function openSessionModal(sessionId) {
+        const img = document.getElementById('sc-modal-img');
+        const playerDiv = document.getElementById('sc-modal-player');
+        img.style.display = 'none';
+        img.src = '';
+        if (_modalPlayer) { _modalPlayer = null; playerDiv.innerHTML = ''; }
+        document.getElementById('sc-modal').classList.add('open');
+
+        const events = await ensureSessionEvents(sessionId);
+        if (!events) {
+            playerDiv.innerHTML = '<p style="color:var(--text-3);padding:48px;text-align:center;font-size:13px">Not enough recording data yet</p>';
+            playerDiv.style.display = 'block';
+            return;
+        }
+        const w = Math.min(Math.round(window.innerWidth * 0.9), 1100);
+        playerDiv.style.display = 'block';
+        _modalPlayer = new rrwebPlayer({
+            target: playerDiv,
+            props: { events, width: w, height: Math.round(w * 0.625), autoPlay: false, showController: true, skipInactive: false }
+        });
+    }
+
     function closeModal() {
         document.getElementById('sc-modal').classList.remove('open');
-        document.getElementById('sc-modal-iframe').src = '';
-        document.getElementById('sc-modal-img-fallback').src = '';
+        document.getElementById('sc-modal-img').src = '';
+        if (_modalPlayer) { _modalPlayer = null; document.getElementById('sc-modal-player').innerHTML = ''; }
     }
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+    // ── Lazy thumbnail loader ─────────────────────────────────────────────────
+    function initThumbObserver() {
+        const obs = new IntersectionObserver(async (entries) => {
+            for (const { isIntersecting, target: el } of entries) {
+                if (!isIntersecting || el.dataset.loaded) continue;
+                el.dataset.loaded = '1';
+                obs.unobserve(el);
+                const events = await ensureSessionEvents(el.dataset.session);
+                if (!events) return;
+                el.innerHTML = '';
+                new rrwebPlayer({
+                    target: el,
+                    props: { events, width: 1080, height: 680, autoPlay: false, showController: false }
+                });
+            }
+        }, { rootMargin: '300px' });
+        document.querySelectorAll('.act-thumb-wrap[data-session]').forEach(el => obs.observe(el));
+    }
 
     // ── Thumbnail rendering ────────────────────────────────────────────────────
 
@@ -458,19 +479,31 @@
     }
 
     function renderThumb(r) {
-        const meta    = r.metadata;
-        const pageUrl = (meta && (meta.url || '')) || '';
-        const safeUrl = pageUrl.replace(/'/g, '%27');
+        const meta      = r.metadata;
+        const sessionId = meta && meta.session_id;
 
         if (r.screenshot_url) {
             const escSc = r.screenshot_url.replace(/'/g, "\\'");
+            // If there's also a session, clicking shows the session player; else just the image
+            const clickFn = sessionId
+                ? `openSessionModal('${sessionId.replace(/'/g, "\\'")}')`
+                : `openImgModal('${escSc}')`;
             return `<img class="sc-thumb" src="${r.screenshot_url}" loading="lazy"
-                onclick="openModal('${safeUrl}', '${escSc}')" title="Click to view page">`;
+                onclick="${clickFn}" title="Click to preview">`;
         }
+        if (sessionId) {
+            const escSid = sessionId.replace(/'/g, "\\'");
+            return `<div class="act-thumb-wrap" id="thumb-${r.id}"
+                data-session="${escSid}"
+                onclick="openSessionModal('${escSid}')" title="Click to preview session">
+              <div class="act-thumb-placeholder">&#x23F3;</div>
+            </div>`;
+        }
+        const pageUrl = (meta && (meta.url || '')) || '';
         if (pageUrl) {
             const path   = fmtPage(meta).slice(0, 18) || '/';
             const domain = fmtDomain(meta);
-            return `<div class="act-url-preview" onclick="openModal('${safeUrl}')" title="Click to view page">
+            return `<div class="act-url-preview" title="${pageUrl}">
                 <div class="url-domain">${domain}</div>
                 <div class="url-path">${path}</div>
             </div>`;
@@ -528,6 +561,7 @@
         }
         html += '</div>';
         el.innerHTML = html;
+        initThumbObserver();
     }
 
     function renderFailedEvents(rows) {
@@ -609,16 +643,12 @@
 
     loadPersonas();
 </script>
-<!-- Page preview modal -->
+<!-- Preview modal: shows screenshot image or rrweb session player -->
 <div id="sc-modal" class="sc-modal-backdrop" onclick="closeModal()">
     <div class="sc-modal-inner" onclick="event.stopPropagation()">
-        <div class="sc-modal-header">
-            <span class="sc-modal-url" id="sc-modal-url"></span>
-            <a class="sc-modal-open-btn" id="sc-modal-open-btn" href="#" target="_blank">Open in tab ↗</a>
-            <button class="sc-modal-close" onclick="closeModal()">&#x2715;</button>
-        </div>
-        <iframe id="sc-modal-iframe" class="sc-modal-iframe" src=""></iframe>
-        <img id="sc-modal-img-fallback" class="sc-modal-img-fallback" src="" alt="Screenshot" style="display:none">
+        <button class="sc-modal-close" onclick="closeModal()">&#x2715;</button>
+        <img id="sc-modal-img" class="sc-modal-img" src="" alt="Screenshot" style="display:none">
+        <div id="sc-modal-player" class="sc-modal-player" style="display:none"></div>
     </div>
 </div>
 
