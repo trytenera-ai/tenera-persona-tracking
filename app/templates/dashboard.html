@@ -324,24 +324,24 @@
     }
 
     function humanizeEventType(raw) {
-        // Convert snake_case event types to readable labels
         const map = {
-            'page_view': 'Viewed page',
-            'pageview': 'Viewed page',
-            'click': 'Clicked',
-            'form_submit': 'Submitted form',
-            'form_fill': 'Filled form',
-            'input': 'Typed input',
-            'scroll': 'Scrolled',
-            'search': 'Searched',
-            'purchase': 'Purchased',
-            'signup': 'Signed up',
-            'login': 'Logged in',
-            'logout': 'Logged out',
-            'download': 'Downloaded',
-            'video_play': 'Played video',
-            'video_pause': 'Paused video',
-            'error': 'Encountered error',
+            'page_view':    'Viewed page',
+            'pageview':     'Viewed page',
+            'click':        'Clicked',
+            'form_submit':  'Submitted form',
+            'form_fill':    'Filled form',
+            'time_on_page': 'Spent on page',
+            'input':        'Typed input',
+            'scroll':       'Scrolled',
+            'search':       'Searched',
+            'purchase':     'Purchased',
+            'signup':       'Signed up',
+            'login':        'Logged in',
+            'logout':       'Logged out',
+            'download':     'Downloaded',
+            'video_play':   'Played video',
+            'video_pause':  'Paused video',
+            'error':        'Encountered error',
         };
         return map[raw] || raw.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     }
@@ -376,6 +376,24 @@
         } else if (action === 'capture_memory') {
             if (meta.title) parts.push(`<em>${meta.title.slice(0, 40)}</em>`);
             if (meta.url) parts.push(`<span class="err-detail" title="${meta.url}">${meta.url.replace(/^https?:\/\/[^/]+/, '').slice(0, 40) || '/'}</span>`);
+        } else if (action === 'click' || (action === 'capture_memory' && meta && meta.event_type === 'click')) {
+            if (meta.text) parts.push(`<strong>"${meta.text.slice(0, 60)}"</strong>`);
+            if (meta.href) {
+                try {
+                    const p = new URL(meta.href).pathname;
+                    if (p && p !== '/') parts.push(`<span class="err-detail">→ ${p.slice(0, 40)}</span>`);
+                } catch(_) {}
+            }
+        } else if (action === 'form_submit' || (action === 'capture_memory' && meta && meta.event_type === 'form_submit')) {
+            if (meta.fields && meta.fields.length)
+                parts.push(`fields: ${meta.fields.slice(0, 5).join(', ')}`);
+            if (meta.form_id) parts.push(`<span class="badge badge-blue">${meta.form_id}</span>`);
+        } else if (action === 'time_on_page' || (action === 'capture_memory' && meta && meta.event_type === 'time_on_page')) {
+            if (meta.duration_seconds != null) {
+                const s = meta.duration_seconds;
+                const label = s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`;
+                parts.push(`<strong>${label}</strong> on page`);
+            }
         } else if (action.startsWith('track:')) {
             const keys = ['url', 'title', 'text', 'element', 'page', 'href', 'label'];
             for (const k of keys) {
@@ -429,9 +447,11 @@
         }
         const w = Math.min(Math.round(window.innerWidth * 0.9), 1100);
         playerDiv.style.display = 'block';
+        // showController: false — show only the first frame as a static snapshot.
+        // Users who want the full replay can click "View Session".
         _modalPlayer = new rrwebPlayer({
             target: playerDiv,
-            props: { events, width: w, height: Math.round(w * 0.625), autoPlay: false, showController: true, skipInactive: false }
+            props: { events, width: w, height: Math.round(w * 0.625), autoPlay: false, showController: false, skipInactive: false }
         });
     }
 
