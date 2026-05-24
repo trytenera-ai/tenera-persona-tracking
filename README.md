@@ -224,6 +224,7 @@ For production:
 
 ## Documentation
 
+- [HTTP E2E Suite](doc/E2E.md)
 - [Design & Architecture](doc/DESIGN.md)
 - [Clustering Algorithms](doc/CLUSTERING.md)
 - [API Reference](doc/API.md)
