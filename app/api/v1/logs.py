@@ -22,6 +22,17 @@ def _is_anonymous_clause():
     )
 
 
+def _exclude_prefixes_clause(exclude_prefixes: Optional[str]):
+    if not exclude_prefixes:
+        return None
+    prefixes = [p.strip().lower() for p in exclude_prefixes.split(",") if p.strip()]
+    if not prefixes:
+        return None
+    return not_(
+        or_(*[Persona.distinct_id.ilike(f"{prefix}%") for prefix in prefixes])
+    )
+
+
 def _event_env_clause(env: str):
     props = Event.properties
     staging = or_(
@@ -41,6 +52,9 @@ async def get_stats(
     distinct_id: Optional[str] = Query(None),
     env: Optional[str] = Query(default=None, pattern="^(production|staging)$"),
     hide_anonymous: bool = Query(default=False),
+    exclude_prefixes: Optional[str] = Query(
+        default=None, description="Comma-separated distinct_id prefixes to hide"
+    ),
     _: str = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ):
@@ -50,12 +64,15 @@ async def get_stats(
         select(func.count(Event.id))
         .where(Event.timestamp >= cutoff)
     )
-    if distinct_id or hide_anonymous:
+    prefix_clause = _exclude_prefixes_clause(exclude_prefixes)
+    if distinct_id or hide_anonymous or prefix_clause is not None:
         q = q.join(Persona)
     if distinct_id:
         q = q.where(Persona.distinct_id == distinct_id)
     if hide_anonymous:
         q = q.where(not_(_is_anonymous_clause()))
+    if prefix_clause is not None:
+        q = q.where(prefix_clause)
     if env:
         q = q.where(_event_env_clause(env))
 
@@ -77,6 +94,9 @@ async def get_activity(
     distinct_id: Optional[str] = Query(None),
     env: Optional[str] = Query(default=None, pattern="^(production|staging)$"),
     hide_anonymous: bool = Query(default=False),
+    exclude_prefixes: Optional[str] = Query(
+        default=None, description="Comma-separated distinct_id prefixes to hide"
+    ),
     _: str = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ):
@@ -90,12 +110,15 @@ async def get_activity(
         .order_by(Event.timestamp.desc())
         .limit(limit)
     )
-    if distinct_id or hide_anonymous:
+    prefix_clause = _exclude_prefixes_clause(exclude_prefixes)
+    if distinct_id or hide_anonymous or prefix_clause is not None:
         q = q.join(Persona)
     if distinct_id:
         q = q.where(Persona.distinct_id == distinct_id)
     if hide_anonymous:
         q = q.where(not_(_is_anonymous_clause()))
+    if prefix_clause is not None:
+        q = q.where(prefix_clause)
     if env:
         q = q.where(_event_env_clause(env))
 

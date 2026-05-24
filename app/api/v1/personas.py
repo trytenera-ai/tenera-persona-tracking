@@ -30,6 +30,17 @@ def _is_anonymous_clause():
     )
 
 
+def _exclude_prefixes_clause(exclude_prefixes: Optional[str]):
+    if not exclude_prefixes:
+        return None
+    prefixes = [p.strip().lower() for p in exclude_prefixes.split(",") if p.strip()]
+    if not prefixes:
+        return None
+    return not_(
+        or_(*[Persona.distinct_id.ilike(f"{prefix}%") for prefix in prefixes])
+    )
+
+
 def _event_env_clause(env: str):
     props = Event.properties
     staging = or_(
@@ -98,6 +109,9 @@ async def list_personas(
     ),
     env: Optional[str] = Query(default=None, pattern="^(production|staging)$"),
     hide_anonymous: bool = Query(default=False),
+    exclude_prefixes: Optional[str] = Query(
+        default=None, description="Comma-separated distinct_id prefixes to hide"
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """List personas with optional search, environment, and anonymous filters."""
@@ -108,6 +122,9 @@ async def list_personas(
         )
     if hide_anonymous:
         query = query.where(not_(_is_anonymous_clause()))
+    prefix_clause = _exclude_prefixes_clause(exclude_prefixes)
+    if prefix_clause is not None:
+        query = query.where(prefix_clause)
     if env:
         query = query.where(_persona_env_exists(env))
 

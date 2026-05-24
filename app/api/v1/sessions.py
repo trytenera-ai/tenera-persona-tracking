@@ -22,6 +22,17 @@ def _is_anonymous_clause():
     )
 
 
+def _exclude_prefixes_clause(exclude_prefixes: Optional[str]):
+    if not exclude_prefixes:
+        return None
+    prefixes = [p.strip().lower() for p in exclude_prefixes.split(",") if p.strip()]
+    if not prefixes:
+        return None
+    return not_(
+        or_(*[Persona.distinct_id.ilike(f"{prefix}%") for prefix in prefixes])
+    )
+
+
 def _session_env_clause(env: str):
     staging = or_(
         Session.url.icontains("staging."),
@@ -39,6 +50,9 @@ async def list_sessions(
     offset: int = Query(default=0, ge=0),
     env: Optional[str] = Query(default=None, pattern="^(production|staging)$"),
     hide_anonymous: bool = Query(default=False),
+    exclude_prefixes: Optional[str] = Query(
+        default=None, description="Comma-separated distinct_id prefixes to hide"
+    ),
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_api_key),
 ):
@@ -49,6 +63,9 @@ async def list_sessions(
     filters = []
     if hide_anonymous:
         filters.append(not_(_is_anonymous_clause()))
+    prefix_clause = _exclude_prefixes_clause(exclude_prefixes)
+    if prefix_clause is not None:
+        filters.append(prefix_clause)
     if env:
         filters.append(_session_env_clause(env))
 
