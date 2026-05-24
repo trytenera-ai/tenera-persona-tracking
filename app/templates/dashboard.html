@@ -181,23 +181,19 @@
         </label>
     </div>
     <div class="user-filter-row" style="margin-bottom: 14px; align-items: flex-start; flex-direction: column;">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+        <label style="display:flex;align-items:center;gap:8px;">
             Prefix filter (stored in your browser)
         </label>
-        <div style="display:flex;gap:12px;flex-wrap:wrap;">
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-                <input id="prefix-invited-toggle" type="checkbox" onchange="onPrefixFiltersChange()">
-                invited
-            </label>
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-                <input id="prefix-existing-toggle" type="checkbox" onchange="onPrefixFiltersChange()">
-                existing
-            </label>
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-                <input id="prefix-e2e-toggle" type="checkbox" onchange="onPrefixFiltersChange()">
-                e2e
-            </label>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <input id="prefix-input" type="text" placeholder="e.g. invited" style="padding:6px 10px;border-radius:6px;border:1px solid var(--border-md);background:var(--bg-elevated);color:var(--text-1);">
+            <button class="refresh-btn" onclick="addPrefixFilter()">+ Add</button>
+            <label for="prefix-logic-select" style="font-size:12px;color:var(--text-3)">Logic</label>
+            <select id="prefix-logic-select" onchange="onPrefixFiltersChange()" style="padding:6px 8px;border-radius:6px;border:1px solid var(--border-md);background:var(--bg-elevated);color:var(--text-1);">
+                <option value="or">OR</option>
+                <option value="and">AND</option>
+            </select>
         </div>
+        <div id="prefix-chip-list" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;"></div>
     </div>
 
     <!-- ── Tab bar ── -->
@@ -276,41 +272,70 @@
     const headers = { 'X-API-Key': API_KEY, 'Content-Type': 'application/json' };
 
     // ── Filters ───────────────────────────────────────────────────────────────
-    const STORAGE_KEY_PREFIX_FILTERS = 'tpt_dashboard_prefix_filters';
+    const STORAGE_KEY_PREFIX_FILTERS = 'tpt_dashboard_prefix_filters_v2';
     const host = window.location.hostname || '';
     let activeEnv = host.includes('production') ? 'production' : 'staging';
     let hideAnonymous = true;
     let excludedPrefixes = [];
+    let excludedPrefixesLogic = 'or';
 
     function initPrefixFilters() {
         let parsed = {};
         try {
             parsed = JSON.parse(localStorage.getItem(STORAGE_KEY_PREFIX_FILTERS) || '{}');
         } catch (_) {}
-        const invited = !!parsed.invited;
-        const existing = !!parsed.existing;
-        const e2e = !!parsed.e2e;
-        document.getElementById('prefix-invited-toggle').checked = invited;
-        document.getElementById('prefix-existing-toggle').checked = existing;
-        document.getElementById('prefix-e2e-toggle').checked = e2e;
-        updateExcludedPrefixesFromToggles();
+        excludedPrefixes = Array.isArray(parsed.prefixes) ? parsed.prefixes.filter(Boolean).map(v => String(v).trim().toLowerCase()) : [];
+        excludedPrefixesLogic = parsed.logic === 'and' ? 'and' : 'or';
+        document.getElementById('prefix-logic-select').value = excludedPrefixesLogic;
+        renderPrefixChips();
+        const input = document.getElementById('prefix-input');
+        if (input) input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                addPrefixFilter();
+            }
+        });
     }
 
-    function updateExcludedPrefixesFromToggles() {
-        excludedPrefixes = [];
-        if (document.getElementById('prefix-invited-toggle').checked) excludedPrefixes.push('invited');
-        if (document.getElementById('prefix-existing-toggle').checked) excludedPrefixes.push('existing');
-        if (document.getElementById('prefix-e2e-toggle').checked) excludedPrefixes.push('e2e');
+    function renderPrefixChips() {
+        const list = document.getElementById('prefix-chip-list');
+        if (!excludedPrefixes.length) {
+            list.innerHTML = '<span style="font-size:12px;color:var(--text-3)">No prefix filters applied</span>';
+            return;
+        }
+        list.innerHTML = excludedPrefixes.map((prefix, idx) =>
+            `<span class="badge badge-blue">${prefix} <button style="margin-left:6px;border:none;background:transparent;color:inherit;cursor:pointer" onclick="removePrefixFilter(${idx})">×</button></span>`
+        ).join('');
+    }
+
+    function persistPrefixFilters() {
+        excludedPrefixesLogic = document.getElementById('prefix-logic-select').value === 'and' ? 'and' : 'or';
+        const state = { prefixes: excludedPrefixes, logic: excludedPrefixesLogic };
+        localStorage.setItem(STORAGE_KEY_PREFIX_FILTERS, JSON.stringify(state));
+    }
+
+    function addPrefixFilter() {
+        const input = document.getElementById('prefix-input');
+        const value = String(input.value || '').trim().toLowerCase();
+        if (!value) return;
+        if (!excludedPrefixes.includes(value)) excludedPrefixes.push(value);
+        input.value = '';
+        renderPrefixChips();
+        persistPrefixFilters();
+        loadPersonas();
+        loadLogs();
+    }
+
+    function removePrefixFilter(index) {
+        excludedPrefixes.splice(index, 1);
+        renderPrefixChips();
+        persistPrefixFilters();
+        loadPersonas();
+        loadLogs();
     }
 
     function onPrefixFiltersChange() {
-        const state = {
-            invited: document.getElementById('prefix-invited-toggle').checked,
-            existing: document.getElementById('prefix-existing-toggle').checked,
-            e2e: document.getElementById('prefix-e2e-toggle').checked,
-        };
-        localStorage.setItem(STORAGE_KEY_PREFIX_FILTERS, JSON.stringify(state));
-        updateExcludedPrefixesFromToggles();
+        persistPrefixFilters();
         loadPersonas();
         loadLogs();
     }
@@ -335,6 +360,7 @@
         const params = new URLSearchParams({ env: activeEnv });
         if (hideAnonymous) params.set('hide_anonymous', 'true');
         if (excludedPrefixes.length) params.set('exclude_prefixes', excludedPrefixes.join(','));
+        params.set('exclude_prefixes_logic', excludedPrefixesLogic);
         for (const [key, value] of Object.entries(extra)) {
             if (value !== null && value !== undefined && value !== '') params.set(key, value);
         }
