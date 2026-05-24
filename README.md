@@ -1,12 +1,8 @@
 # Tenera Persona Tracking (TPT)
 
-TPT is Tenera's open-source persona analytics companion: a small FastAPI service and CLI for collecting product behavior by `distinct_id`, attaching flexible persona attributes, replaying sessions, and clustering users into cohorts that Tenera can use for research and product decisions.
+TPT is an open-source persona tracking and cohort analytics service. It provides a FastAPI server and CLI for collecting product behavior by `distinct_id`, attaching flexible persona attributes, replaying sessions, and clustering users into cohorts.
 
-Use it when you want to answer questions like:
-
-- Which real users match each Tenera persona or segment?
-- What did a persona actually do in the product before they converted, churned, or hit friction?
-- Which product journeys should Tenera interview, playtest, or analyze next?
+Use it when you want a small, self-hostable analytics layer for persona profiles, event timelines, and cohort discovery.
 
 ## What TPT provides
 
@@ -14,8 +10,8 @@ Use it when you want to answer questions like:
 - **Event timelines** — PostHog-style event ingestion through `/api/v1/track`, with optional properties, timestamps, and screenshots.
 - **Session replay** — rrweb session ingestion and replay for watching the exact browser journey behind a persona's activity.
 - **Cohort clustering** — k-means, HDBSCAN, and k-prototypes clustering over persona entities, with optional LLM-generated cluster names and summaries.
-- **CLI + REST API** — the `tpt` CLI uses the same documented API that Tenera or any external app can call.
-- **Local or production storage** — SQLite for local development; Supabase/Postgres for production deployments and direct Tenera integration.
+- **CLI + REST API** — the `tpt` CLI uses the same documented API that external tools can call.
+- **Local or production storage** — SQLite for local development; Supabase/Postgres for production deployments.
 
 ## Repository
 
@@ -67,7 +63,7 @@ Open:
 export TPT_BASE_URL=http://localhost:8000
 export TPT_API_KEY=your-read-write-admin-key
 
-# Create a persona with Tenera-relevant attributes
+# Create a persona with useful attributes
 tpt persona create user_123 \
   --name "Jane Doe" \
   -e role=product_manager \
@@ -80,7 +76,7 @@ tpt entity set user_123 lifecycle_stage activated
 
 # Track product behavior
 tpt track user_123 page_view -p '{"page":"/personas","project":"pricing-redesign"}'
-tpt track user_123 feature_used -p '{"feature":"tenera_run_playtest"}'
+tpt track user_123 feature_used -p '{"feature":"dashboard_filter"}'
 
 # Inspect a persona timeline
 tpt events user_123
@@ -92,43 +88,32 @@ tpt cluster results
 
 See [`examples/`](examples/) for runnable scripts.
 
-## Integrating TPT with Tenera
+## How it works
 
-Tenera can use TPT as a behavioral memory layer alongside synthetic research:
+TPT runs as a standalone API service with a CLI client:
 
-1. **Your app sends events to TPT** using the browser-safe `WRITE_KEY`.
-2. **TPT stores persona attributes, product events, screenshots, and rrweb session batches** by `distinct_id`.
-3. **Tenera reads TPT through the admin `API_KEY`** to understand which personas exist, what they did, and which cohorts should be researched or simulated.
-4. **Tenera uses those cohorts for interviews, panels, playtests, and decision reports** instead of starting from a blank persona model.
+1. A client sends persona, event, or session data to the FastAPI API.
+2. TPT stores that data in SQLite or Supabase/Postgres.
+3. The dashboard, CLI, and API can inspect personas, timelines, sessions, logs, and clustering results.
 
 ```text
-User's app ──events/sessions──▶ TPT API ──SQLite or Supabase──▶ Tenera
-                     ▲              │
-                     └──── CLI ◀────┘
+Client app / CLI ──▶ TPT API ──▶ SQLite or Supabase/Postgres
+                         │
+                         └──▶ Dashboard and API docs
 ```
 
-Recommended identity convention: use the same stable `distinct_id` everywhere Tenera needs to reconcile data, such as your internal user ID, account-user compound ID, or email hash.
+Recommended identity convention: use a stable `distinct_id`, such as an internal user ID, account-user compound ID, or privacy-preserving hash.
 
-### Environment variables for a Tenera deployment
-
-In TPT:
+### Environment variables
 
 ```dotenv
-API_KEY=admin-key-used-by-tenera-server
-WRITE_KEY=browser-safe-write-key
-DATABASE_MODE=supabase
-DATABASE_URL=postgresql+asyncpg://...
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_KEY=your-service-role-key
+API_KEY=your-read-write-admin-key
+WRITE_KEY=your-browser-safe-ingestion-key
+DATABASE_MODE=sqlite
+DATABASE_URL=postgresql+asyncpg://... # optional, for Supabase/Postgres mode
+SUPABASE_URL=https://your-project.supabase.co # optional screenshot storage
+SUPABASE_SERVICE_KEY=your-service-role-key # optional screenshot storage
 DB_SCHEMA=public
-```
-
-In Tenera or any service consuming TPT:
-
-```dotenv
-TPT_BASE_URL=https://your-tpt-deployment.example.com
-TPT_API_KEY=admin-key-used-by-tenera-server
-TPT_WRITE_KEY=browser-safe-write-key
 ```
 
 ## Browser event ingestion
@@ -147,7 +132,7 @@ await fetch(`${TPT_BASE_URL}/api/v1/track?distinct_id=${encodeURIComponent(userI
     properties: {
       page: window.location.pathname,
       project_id: currentProjectId,
-      source: "tenera-app",
+      source: "web-app",
     },
   }),
 });
