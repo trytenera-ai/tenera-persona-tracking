@@ -4,6 +4,16 @@ TPT is an open-source persona tracking and cohort analytics service. It provides
 
 Use it when you want a small, self-hostable analytics layer for persona profiles, event timelines, and cohort discovery.
 
+## Demo
+
+### Personas dashboard
+
+![TPT personas dashboard](docs/demo/personas-dashboard.png)
+
+### Action log
+
+![TPT action log](docs/demo/action-log.png)
+
 ## What TPT provides
 
 - **Persona profiles** — one record per tracked identity (`distinct_id`) with arbitrary key/value entities such as plan, role, company, industry, lifecycle stage, or project context.
