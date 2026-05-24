@@ -198,6 +198,13 @@
         <button class="env-tab" onclick="setEnv('staging')">Staging</button>
     </div>
 
+    <div class="user-filter-row" style="margin-bottom: 14px;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input id="hide-anonymous-toggle" type="checkbox" checked onchange="onHideAnonymousChange(this.checked)">
+            Hide anonymous personas and actions
+        </label>
+    </div>
+
     <!-- ── Tab bar ── -->
     <div class="tabs">
         <button class="tab active" onclick="switchTab('personas')">Personas</button>
@@ -275,11 +282,13 @@
 
     // ── Environment filter ────────────────────────────────────────────────────
     let activeEnv = 'production';
+    let hideAnonymous = true;
 
     function setEnv(env) {
         activeEnv = env;
         document.querySelectorAll('.env-tab').forEach(t => t.classList.remove('active'));
         document.querySelector(`.env-tab[onclick*="${env}"]`).classList.add('active');
+        loadPersonas();
         loadLogs();
     }
 
@@ -291,6 +300,31 @@
         const url = meta.url || '';
         if (url.includes('localhost') || url.includes('staging.') || url.includes(':3001')) return 'staging';
         return 'production';
+    }
+
+    function onHideAnonymousChange(checked) {
+        hideAnonymous = checked;
+        if (hideAnonymous && activePersonaFilter && isAnonymousDistinctId(activePersonaFilter)) {
+            activePersonaFilter = null;
+            const sel = document.getElementById('user-filter-select');
+            if (sel) sel.value = '';
+        }
+        loadPersonas();
+        loadLogs();
+    }
+
+    function isAnonymousDistinctId(distinctId) {
+        const did = String(distinctId || '').toLowerCase();
+        return did.startsWith('anon_') || did.startsWith('anonymous');
+    }
+
+    function dashboardQuery(extra = {}) {
+        const params = new URLSearchParams({ env: activeEnv });
+        if (hideAnonymous) params.set('hide_anonymous', 'true');
+        for (const [key, value] of Object.entries(extra)) {
+            if (value !== null && value !== undefined && value !== '') params.set(key, value);
+        }
+        return params.toString();
     }
 
     function switchTab(name) {
@@ -311,9 +345,10 @@
     // ── Personas ───────────────────────────────────────────────────────────────
 
     async function loadPersonas() {
+        const query = dashboardQuery({ limit: 200 });
         const [personas, sessions] = await Promise.all([
-            fetchJSON('/api/v1/personas?limit=200'),
-            fetchJSON('/api/v1/sessions?limit=1'),
+            fetchJSON(`/api/v1/personas?${query}`),
+            fetchJSON(`/api/v1/sessions?${dashboardQuery({ limit: 1 })}`),
         ]);
 
         if (personas) {
@@ -323,9 +358,8 @@
         }
 
         if (sessions !== null) {
-            // sessions endpoint returns an array; use personas count as proxy if no total
             document.getElementById('session-count').textContent =
-                Array.isArray(sessions) ? sessions.length + (sessions.length === 1 ? '' : '') : '--';
+                typeof sessions.count === 'number' ? sessions.count.toLocaleString() : '--';
         }
     }
 
@@ -699,14 +733,12 @@
     }
 
     async function loadLogs() {
-        const didParam = activePersonaFilter
-            ? `&distinct_id=${encodeURIComponent(activePersonaFilter)}`
-            : '';
+        const did = activePersonaFilter || undefined;
 
         const [stats, activity, failed_actions, failed] = await Promise.all([
-            fetchJSON('/api/v1/logs/stats'),
-            fetchJSON(`/api/v1/logs/activity?limit=100${didParam}`),
-            fetchJSON(`/api/v1/logs/activity?limit=50&saved=false${didParam}`),
+            fetchJSON(`/api/v1/logs/stats?${dashboardQuery({ distinct_id: did })}`),
+            fetchJSON(`/api/v1/logs/activity?${dashboardQuery({ limit: 100, distinct_id: did })}`),
+            fetchJSON(`/api/v1/logs/activity?${dashboardQuery({ limit: 50, saved: false, distinct_id: did })}`),
             fetchJSON('/api/v1/logs/failed-events?limit=50'),
         ]);
 
@@ -718,9 +750,11 @@
             document.getElementById('ls-failed').textContent = stats.failed_events_24h.toLocaleString();
         }
 
-        const byEnv = rows => rows ? rows.filter(r => inferEnv(r) === activeEnv) : null;
-        renderActivityTable(byEnv(failed_actions), 'errors-container', true);
-        renderActivityTable(byEnv(activity), 'activity-container', false);
+        const visibleRows = rows => rows
+            ? rows.filter(r => inferEnv(r) === activeEnv && (!hideAnonymous || !isAnonymousDistinctId(r.distinct_id)))
+            : null;
+        renderActivityTable(visibleRows(failed_actions), 'errors-container', true);
+        renderActivityTable(visibleRows(activity), 'activity-container', false);
         renderFailedEvents(failed);
     }
 

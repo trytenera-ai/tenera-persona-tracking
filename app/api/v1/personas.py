@@ -1,13 +1,15 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import exists, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import verify_api_key
 from app.core.database import get_db
 from app.models.entity import Entity
+from app.models.event import Event
 from app.models.persona import Persona
+from app.models.session import Session
 from app.schemas.persona import (
     EntityResponse,
     EntitySet,
@@ -18,6 +20,47 @@ from app.schemas.persona import (
 )
 
 router = APIRouter(prefix="/personas", tags=["personas"], dependencies=[Depends(verify_api_key)])
+
+
+def _is_anonymous_clause():
+    return or_(
+        Persona.distinct_id.startswith("anon_"),
+        Persona.distinct_id.startswith("anonymous"),
+        func.coalesce(Persona.name, "") == "anonymous",
+    )
+
+
+def _event_env_clause(env: str):
+    props = Event.properties
+    staging = or_(
+        props.icontains('"env":"staging"'),
+        props.icontains('"env": "staging"'),
+        props.icontains("staging."),
+        props.icontains("localhost"),
+        props.icontains(":3001"),
+    )
+    if env == "staging":
+        return staging
+    return or_(props.is_(None), not_(staging))
+
+
+def _session_env_clause(env: str):
+    url = Session.url
+    staging = or_(
+        url.icontains("staging."),
+        url.icontains("localhost"),
+        url.icontains(":3001"),
+    )
+    if env == "staging":
+        return staging
+    return or_(url.is_(None), not_(staging))
+
+
+def _persona_env_exists(env: str):
+    return or_(
+        exists().where(Event.persona_id == Persona.id, _event_env_clause(env)),
+        exists().where(Session.persona_id == Persona.id, _session_env_clause(env)),
+    )
 
 
 # --- Persona CRUD ---
@@ -53,18 +96,25 @@ async def list_personas(
     search: Optional[str] = Query(
         default=None, description="Search by distinct_id or name"
     ),
+    env: Optional[str] = Query(default=None, pattern="^(production|staging)$"),
+    hide_anonymous: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all personas with optional search."""
+    """List personas with optional search, environment, and anonymous filters."""
     query = select(Persona)
     if search:
         query = query.where(
             Persona.distinct_id.icontains(search) | Persona.name.icontains(search)
         )
+    if hide_anonymous:
+        query = query.where(not_(_is_anonymous_clause()))
+    if env:
+        query = query.where(_persona_env_exists(env))
+
     query = query.order_by(Persona.created_at.desc()).offset(offset).limit(limit)
 
     result = await db.execute(query)
-    personas = result.scalars().all()
+    personas = result.scalars().unique().all()
     return PersonaListResponse(results=personas, count=len(personas))
 
 

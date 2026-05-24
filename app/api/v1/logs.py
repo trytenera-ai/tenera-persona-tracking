@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, func
+from sqlalchemy import func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -14,9 +14,33 @@ from app.models.persona import Persona
 router = APIRouter(prefix="/logs", tags=["logs"])
 
 
+def _is_anonymous_clause():
+    return or_(
+        Persona.distinct_id.startswith("anon_"),
+        Persona.distinct_id.startswith("anonymous"),
+        func.coalesce(Persona.name, "") == "anonymous",
+    )
+
+
+def _event_env_clause(env: str):
+    props = Event.properties
+    staging = or_(
+        props.icontains('"env":"staging"'),
+        props.icontains('"env": "staging"'),
+        props.icontains("staging."),
+        props.icontains("localhost"),
+        props.icontains(":3001"),
+    )
+    if env == "staging":
+        return staging
+    return or_(props.is_(None), not_(staging))
+
+
 @router.get("/stats")
 async def get_stats(
     distinct_id: Optional[str] = Query(None),
+    env: Optional[str] = Query(default=None, pattern="^(production|staging)$"),
+    hide_anonymous: bool = Query(default=False),
     _: str = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ):
@@ -26,8 +50,14 @@ async def get_stats(
         select(func.count(Event.id))
         .where(Event.timestamp >= cutoff)
     )
+    if distinct_id or hide_anonymous:
+        q = q.join(Persona)
     if distinct_id:
-        q = q.join(Persona).where(Persona.distinct_id == distinct_id)
+        q = q.where(Persona.distinct_id == distinct_id)
+    if hide_anonymous:
+        q = q.where(not_(_is_anonymous_clause()))
+    if env:
+        q = q.where(_event_env_clause(env))
 
     total = (await db.execute(q)).scalar_one()
 
@@ -45,6 +75,8 @@ async def get_activity(
     limit: int = Query(100, le=500),
     saved: Optional[bool] = Query(None),
     distinct_id: Optional[str] = Query(None),
+    env: Optional[str] = Query(default=None, pattern="^(production|staging)$"),
+    hide_anonymous: bool = Query(default=False),
     _: str = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ):
@@ -58,8 +90,14 @@ async def get_activity(
         .order_by(Event.timestamp.desc())
         .limit(limit)
     )
+    if distinct_id or hide_anonymous:
+        q = q.join(Persona)
     if distinct_id:
-        q = q.join(Persona).where(Persona.distinct_id == distinct_id)
+        q = q.where(Persona.distinct_id == distinct_id)
+    if hide_anonymous:
+        q = q.where(not_(_is_anonymous_clause()))
+    if env:
+        q = q.where(_event_env_clause(env))
 
     rows = (await db.execute(q)).scalars().all()
 
