@@ -1,9 +1,9 @@
 import json
-from typing import Any, List
+from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import verify_api_key, verify_track_key
@@ -14,9 +14,71 @@ from app.models.session import Session, SessionEventBatch
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
+def _is_anonymous_clause():
+    return or_(
+        Persona.distinct_id.startswith("anon_"),
+        Persona.distinct_id.startswith("anonymous"),
+        func.coalesce(Persona.name, "") == "anonymous",
+    )
+
+
+def _session_env_clause(env: str):
+    staging = or_(
+        Session.url.icontains("staging."),
+        Session.url.icontains("localhost"),
+        Session.url.icontains(":3001"),
+    )
+    if env == "staging":
+        return staging
+    return or_(Session.url.is_(None), not_(staging))
+
+
+@router.get("")
+async def list_sessions(
+    limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0, ge=0),
+    env: Optional[str] = Query(default=None, pattern="^(production|staging)$"),
+    hide_anonymous: bool = Query(default=False),
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(verify_api_key),
+):
+    """List sessions and return a total count for dashboard summary cards."""
+    base = select(Session).join(Persona)
+    count_q = select(func.count(Session.id)).join(Persona)
+
+    filters = []
+    if hide_anonymous:
+        filters.append(not_(_is_anonymous_clause()))
+    if env:
+        filters.append(_session_env_clause(env))
+
+    if filters:
+        base = base.where(*filters)
+        count_q = count_q.where(*filters)
+
+    total = (await db.execute(count_q)).scalar_one()
+    result = await db.execute(
+        base.order_by(Session.created_at.desc()).offset(offset).limit(limit)
+    )
+    sessions = result.scalars().all()
+    return {
+        "results": [
+            {
+                "id": s.id,
+                "persona_id": s.persona_id,
+                "url": s.url,
+                "created_at": s.created_at.isoformat(),
+                "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+            }
+            for s in sessions
+        ],
+        "count": total,
+    }
+
+
 class SessionCreate(BaseModel):
     distinct_id: str
-    url: str | None = None
+    url: Optional[str] = None
 
 
 @router.post("", status_code=201)
