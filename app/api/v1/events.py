@@ -5,18 +5,35 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import verify_api_key, verify_track_key
 from app.core.config import settings
 from app.core.database import get_db
+from app.models.entity import Entity
 from app.models.event import Event
 from app.models.persona import Persona
+from app.models.session import Session
 from app.schemas.persona import EventCreate, EventResponse
 
 # No router-level auth — each endpoint declares its own so /track can use write_key
 router = APIRouter(tags=["events"])
+
+
+class IdentifyRequest(BaseModel):
+    """Merge an anonymous tracked persona into a known distinct_id."""
+
+    anon_id: str = Field(..., max_length=255)
+    distinct_id: str = Field(..., max_length=255)
+
+
+class IdentifyResponse(BaseModel):
+    distinct_id: str
+    anon_id: str
+    merged: bool
+    persona_id: str
 
 
 async def upload_screenshot(b64: str) -> Optional[str]:
@@ -90,6 +107,124 @@ async def track_event(
     await db.refresh(event)
 
     return _event_to_response(event)
+
+
+@router.post("/identify", response_model=IdentifyResponse)
+async def identify_persona(
+    body: IdentifyRequest,
+    _: str = Depends(verify_track_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """Merge an anonymous persona into a known identity.
+
+    The browser tracks signed-out visitors under a stable ``anon_*`` id. When a
+    real user signs in, this endpoint moves the anonymous persona's events,
+    sessions, and non-conflicting entities onto the known ``distinct_id`` so the
+    full pre-login journey remains attached to the user.
+    """
+    anon_id = body.anon_id.strip()
+    distinct_id = body.distinct_id.strip()
+    if not anon_id or not distinct_id:
+        raise HTTPException(status_code=400, detail="anon_id and distinct_id are required")
+
+    known_result = await db.execute(select(Persona).where(Persona.distinct_id == distinct_id))
+    known = known_result.scalar_one_or_none()
+
+    anon_result = await db.execute(select(Persona).where(Persona.distinct_id == anon_id))
+    anon = anon_result.scalar_one_or_none()
+
+    # Same id / no anonymous record yet: ensure the known persona exists and log
+    # the identify call as a successful no-op.
+    if anon_id == distinct_id or not anon:
+        if not known:
+            known = Persona(distinct_id=distinct_id)
+            db.add(known)
+            await db.flush()
+        db.add(
+            Event(
+                persona_id=known.id,
+                event_type="identify",
+                properties=json.dumps({"anon_id": anon_id, "merged": False}),
+                timestamp=datetime.now(timezone.utc),
+            )
+        )
+        await db.commit()
+        await db.refresh(known)
+        return IdentifyResponse(
+            distinct_id=distinct_id,
+            anon_id=anon_id,
+            merged=False,
+            persona_id=known.id,
+        )
+
+    # If the known identity doesn't exist, preserve the anonymous persona's row
+    # and just rename it. This keeps all foreign keys intact.
+    if not known:
+        anon.distinct_id = distinct_id
+        db.add(
+            Event(
+                persona_id=anon.id,
+                event_type="identify",
+                properties=json.dumps({"anon_id": anon_id, "merged": True}),
+                timestamp=datetime.now(timezone.utc),
+            )
+        )
+        await db.commit()
+        await db.refresh(anon)
+        return IdentifyResponse(
+            distinct_id=distinct_id,
+            anon_id=anon_id,
+            merged=True,
+            persona_id=anon.id,
+        )
+
+    # Known and anonymous personas both exist. Re-parent anonymous history.
+    anon_events = (
+        await db.execute(select(Event).where(Event.persona_id == anon.id))
+    ).scalars().all()
+    for event in anon_events:
+        event.persona_id = known.id
+
+    anon_sessions = (
+        await db.execute(select(Session).where(Session.persona_id == anon.id))
+    ).scalars().all()
+    for session in anon_sessions:
+        session.persona_id = known.id
+
+    known_entity_keys = {
+        row[0]
+        for row in (
+            await db.execute(select(Entity.key).where(Entity.persona_id == known.id))
+        ).all()
+    }
+    anon_entities = (
+        await db.execute(select(Entity).where(Entity.persona_id == anon.id))
+    ).scalars().all()
+    for entity in anon_entities:
+        if entity.key in known_entity_keys:
+            await db.delete(entity)
+        else:
+            entity.persona_id = known.id
+            known_entity_keys.add(entity.key)
+
+    db.add(
+        Event(
+            persona_id=known.id,
+            event_type="identify",
+            properties=json.dumps({"anon_id": anon_id, "merged": True}),
+            timestamp=datetime.now(timezone.utc),
+        )
+    )
+    await db.delete(anon)
+    await db.commit()
+    await db.refresh(known)
+
+    return IdentifyResponse(
+        distinct_id=distinct_id,
+        anon_id=anon_id,
+        merged=True,
+        persona_id=known.id,
+    )
 
 
 @router.get("/personas/{persona_id}/events", response_model=List[EventResponse])
