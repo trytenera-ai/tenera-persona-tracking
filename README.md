@@ -224,6 +224,7 @@ For production:
 
 ## Documentation
 
+- [Automated Persona Capture Roadmap](doc/AUTOMATED_PERSONA_ROADMAP.md)
 - [Design & Architecture](doc/DESIGN.md)
 - [Clustering Algorithms](doc/CLUSTERING.md)
 - [API Reference](doc/API.md)
