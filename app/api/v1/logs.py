@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, not_, or_, select
+from sqlalchemy import and_, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -22,15 +22,16 @@ def _is_anonymous_clause():
     )
 
 
-def _exclude_prefixes_clause(exclude_prefixes: Optional[str]):
+def _exclude_prefixes_clause(exclude_prefixes: Optional[str], logic: str = "or"):
     if not exclude_prefixes:
         return None
     prefixes = [p.strip().lower() for p in exclude_prefixes.split(",") if p.strip()]
     if not prefixes:
         return None
-    return not_(
-        or_(*[Persona.distinct_id.ilike(f"{prefix}%") for prefix in prefixes])
-    )
+    clauses = [Persona.distinct_id.ilike(f"{prefix}%") for prefix in prefixes]
+    if logic == "and":
+        return not_(and_(*clauses))
+    return not_(or_(*clauses))
 
 
 def _event_env_clause(env: str):
@@ -55,6 +56,7 @@ async def get_stats(
     exclude_prefixes: Optional[str] = Query(
         default=None, description="Comma-separated distinct_id prefixes to hide"
     ),
+    exclude_prefixes_logic: str = Query(default="or", pattern="^(or|and)$"),
     _: str = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ):
@@ -64,7 +66,7 @@ async def get_stats(
         select(func.count(Event.id))
         .where(Event.timestamp >= cutoff)
     )
-    prefix_clause = _exclude_prefixes_clause(exclude_prefixes)
+    prefix_clause = _exclude_prefixes_clause(exclude_prefixes, exclude_prefixes_logic)
     if distinct_id or hide_anonymous or prefix_clause is not None:
         q = q.join(Persona)
     if distinct_id:
@@ -97,6 +99,7 @@ async def get_activity(
     exclude_prefixes: Optional[str] = Query(
         default=None, description="Comma-separated distinct_id prefixes to hide"
     ),
+    exclude_prefixes_logic: str = Query(default="or", pattern="^(or|and)$"),
     _: str = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ):
@@ -110,7 +113,7 @@ async def get_activity(
         .order_by(Event.timestamp.desc())
         .limit(limit)
     )
-    prefix_clause = _exclude_prefixes_clause(exclude_prefixes)
+    prefix_clause = _exclude_prefixes_clause(exclude_prefixes, exclude_prefixes_logic)
     if distinct_id or hide_anonymous or prefix_clause is not None:
         q = q.join(Persona)
     if distinct_id:

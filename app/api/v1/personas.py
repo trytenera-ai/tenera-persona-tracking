@@ -1,7 +1,7 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import exists, func, not_, or_, select
+from sqlalchemy import and_, exists, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import verify_api_key
@@ -30,15 +30,16 @@ def _is_anonymous_clause():
     )
 
 
-def _exclude_prefixes_clause(exclude_prefixes: Optional[str]):
+def _exclude_prefixes_clause(exclude_prefixes: Optional[str], logic: str = "or"):
     if not exclude_prefixes:
         return None
     prefixes = [p.strip().lower() for p in exclude_prefixes.split(",") if p.strip()]
     if not prefixes:
         return None
-    return not_(
-        or_(*[Persona.distinct_id.ilike(f"{prefix}%") for prefix in prefixes])
-    )
+    clauses = [Persona.distinct_id.ilike(f"{prefix}%") for prefix in prefixes]
+    if logic == "and":
+        return not_(and_(*clauses))
+    return not_(or_(*clauses))
 
 
 def _event_env_clause(env: str):
@@ -112,6 +113,7 @@ async def list_personas(
     exclude_prefixes: Optional[str] = Query(
         default=None, description="Comma-separated distinct_id prefixes to hide"
     ),
+    exclude_prefixes_logic: str = Query(default="or", pattern="^(or|and)$"),
     db: AsyncSession = Depends(get_db),
 ):
     """List personas with optional search, environment, and anonymous filters."""
@@ -122,7 +124,7 @@ async def list_personas(
         )
     if hide_anonymous:
         query = query.where(not_(_is_anonymous_clause()))
-    prefix_clause = _exclude_prefixes_clause(exclude_prefixes)
+    prefix_clause = _exclude_prefixes_clause(exclude_prefixes, exclude_prefixes_logic)
     if prefix_clause is not None:
         query = query.where(prefix_clause)
     if env:
