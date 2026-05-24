@@ -194,8 +194,8 @@
 
     <!-- ── Environment selector ── -->
     <div class="env-bar">
-        <button class="env-tab active" onclick="setEnv('production')">Production</button>
-        <button class="env-tab" onclick="setEnv('staging')">Staging</button>
+        <button id="env-tab-production" class="env-tab active" onclick="setEnv('production')">Production</button>
+        <button id="env-tab-staging" class="env-tab" onclick="setEnv('staging')">Staging</button>
     </div>
 
     <div class="user-filter-row" style="margin-bottom: 14px;">
@@ -282,6 +282,21 @@
 
     // ── Environment filter ────────────────────────────────────────────────────
     let activeEnv = 'production';
+
+    function initEnvTabs() {
+        const host = window.location.hostname || '';
+        const isStagingHost = host.includes('staging');
+        const prodTab = document.getElementById('env-tab-production');
+        const stagingTab = document.getElementById('env-tab-staging');
+
+        if (isStagingHost) {
+            // Staging deployment should only expose staging data.
+            activeEnv = 'staging';
+            if (prodTab) prodTab.style.display = 'none';
+            document.querySelectorAll('.env-tab').forEach(t => t.classList.remove('active'));
+            if (stagingTab) stagingTab.classList.add('active');
+        }
+    }
     let hideAnonymous = true;
 
     function setEnv(env) {
@@ -758,6 +773,7 @@
         renderFailedEvents(failed);
     }
 
+    initEnvTabs();
     loadPersonas();
 </script>
 <!-- Preview modal: shows screenshot image or rrweb session player -->
