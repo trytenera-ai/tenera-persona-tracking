@@ -9,18 +9,24 @@ The suite intentionally does **not** connect to the database directly. It valida
 `scripts/e2e_http.py` validates:
 
 - health endpoint
-- dashboard HTML render
-- persona create/list/get/delete
-- entity upsert
+- dashboard HTML render and dashboard wiring for sessions, anonymous hiding, and browser-stored prefix filters
+- read/write API-key rejection checks, including write-key read isolation when a separate write key is configured
+- persona create/list/get/update/delete
+- duplicate persona conflict handling
+- persona pagination with `limit`/`offset`
+- entity upsert/list/delete
 - event tracking through the write key
-- persona event timeline reads
+- screenshot capture/storage response behavior
+- persona event timeline reads and event-type filtering
 - session creation
-- rrweb session event append/read
-- session count endpoint
-- log stats and activity endpoints
-- environment filtering
+- rrweb session event append/read and timestamp ordering
+- replay page render and API wiring
+- session count endpoint and session environment filtering
+- log stats, distinct-user stats, activity, `saved=false`, and failed-event endpoints
+- production/staging environment isolation for personas and activity logs
 - anonymous filtering
-- prefix filtering
+- OR and AND prefix filtering
+- 404 handling for missing personas and sessions
 - cleanup of synthetic personas/events/sessions
 
 All test records use a unique `tpt-e2e-*` run ID and are deleted at the end by default.
@@ -71,7 +77,7 @@ If `TPT_E2E_WRITE_KEY` is omitted, the suite falls back to `TPT_E2E_API_KEY` bec
 
 ## Daily suite integration
 
-A daily runner can call the deployed-service command above after resolving the deployment URL and secrets. The script exits non-zero on failure and prints `TPT E2E PASS` on success.
+A daily runner can call the deployed-service command above after resolving the deployment URL and secrets. The script exits non-zero on failure and prints `TPT E2E PASS (<n> checks)` on success.
 
 Recommended daily target order:
 
