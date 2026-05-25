@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,23 @@ from app.schemas.persona import EventCreate, EventResponse
 
 # No router-level auth — each endpoint declares its own so /track can use write_key
 router = APIRouter(tags=["events"])
+
+
+def _header_scope(request: Request) -> dict:
+    def _v(name: str) -> str | None:
+        raw = request.headers.get(name)
+        if raw is None:
+            return None
+        trimmed = raw.strip()
+        return trimmed or None
+
+    return {
+        "organization_id": _v("x-tpt-organization-id"),
+        "organization_name": _v("x-tpt-organization-name"),
+        "organization_domain": _v("x-tpt-organization-domain"),
+        "project_id": _v("x-tpt-project-id"),
+        "project_name": _v("x-tpt-project-name"),
+    }
 
 
 async def upload_screenshot(b64: str) -> Optional[str]:
@@ -57,6 +74,7 @@ async def upload_screenshot(b64: str) -> Optional[str]:
 @router.post("/track", response_model=EventResponse, status_code=201)
 async def track_event(
     body: EventCreate,
+    request: Request,
     distinct_id: str = Query(..., description="The persona's distinct_id to track against"),
     _: str = Depends(verify_track_key),
     db: AsyncSession = Depends(get_db),
@@ -78,10 +96,15 @@ async def track_event(
         db.add(persona)
         await db.flush()
 
+    scope = {k: v for k, v in _header_scope(request).items() if v is not None}
+    merged_props = dict(scope)
+    if body.properties:
+        merged_props.update(body.properties)
+
     event = Event(
         persona_id=persona.id,
         event_type=body.event_type,
-        properties=json.dumps(body.properties) if body.properties else None,
+        properties=json.dumps(merged_props) if merged_props else None,
         timestamp=body.timestamp or datetime.now(timezone.utc),
         screenshot_url=screenshot_url,
     )
