@@ -396,14 +396,28 @@
 
     async function loadPersonas() {
         const query = dashboardQuery({ limit: 200 });
-        const [personas, sessions] = await Promise.all([
+        const scoped = {
+            organization_name: activeOrgFilter || undefined,
+            project_name: activeProjectFilter || undefined,
+        };
+        const [personas, sessions, scopeRows] = await Promise.all([
             fetchJSON(`/api/v1/personas?${query}`),
             fetchJSON(`/api/v1/sessions?${dashboardQuery({ limit: 1 })}`),
+            fetchJSON(`/api/v1/logs/activity?${dashboardQuery({ limit: 500, ...scoped })}`),
         ]);
+
+        const personaScopeByDistinct = new Map();
+        for (const r of (scopeRows || [])) {
+            if (!r?.distinct_id || personaScopeByDistinct.has(r.distinct_id)) continue;
+            personaScopeByDistinct.set(r.distinct_id, {
+                org: rowOrgName(r) || '—',
+                project: rowProjectName(r) || '—',
+            });
+        }
 
         if (personas) {
             document.getElementById('persona-count').textContent = personas.count;
-            renderPersonas(personas.results);
+            renderPersonas(personas.results, personaScopeByDistinct);
             populateUserFilter(personas.results);
         }
 
@@ -413,17 +427,20 @@
         }
     }
 
-    function renderPersonas(personas) {
+    function renderPersonas(personas, personaScopeByDistinct) {
         const el = document.getElementById('personas-container');
         if (!personas.length) { el.innerHTML = '<div class="empty">No personas yet</div>'; return; }
-        let html = '<table><thead><tr><th>Distinct ID</th><th>Name</th><th>Entities</th><th>Created</th><th></th></tr></thead><tbody>';
+        let html = '<table><thead><tr><th>Distinct ID</th><th>Name</th><th>Organization</th><th>Project</th><th>Entities</th><th>Created</th><th></th></tr></thead><tbody>';
         for (const p of personas) {
             const entities = (p.entities || []).map(e => `<span class="badge badge-blue">${e.key}=${e.value}</span>`).join(' ');
             const did = p.distinct_id.replace(/'/g, "\\'");
             const exact = fmtTime(p.created_at);
+            const scope = personaScopeByDistinct?.get(p.distinct_id) || { org: '—', project: '—' };
             html += `<tr>
                 <td><strong>${p.distinct_id}</strong></td>
                 <td>${p.name || '--'}</td>
+                <td>${scope.org}</td>
+                <td>${scope.project}</td>
                 <td>${entities}</td>
                 <td title="${exact}">${timeAgo(p.created_at)}</td>
                 <td><button class="refresh-btn" onclick="filterByPersona('${did}')" title="View action log">&#x1F50D;</button></td>
@@ -713,6 +730,8 @@
                     <div class="act-meta">
                         <span class="act-who">${r.distinct_id}</span>
                         <span class="act-time" title="${exact}">${ago}</span>
+                        ${rowOrgName(r) ? `<span class="act-page" title="Organization">${rowOrgName(r)}</span>` : ''}
+                        ${rowProjectName(r) ? `<span class="act-page" title="Project">${rowProjectName(r)}</span>` : ''}
                         ${page !== '--' ? `<span class="act-page" title="${pageUrl}">${page}</span>` : ''}
                         ${sessionId ? `<span class="act-session-badge" title="Session ${sessionId}">${sessionId.slice(0, 8)}</span>` : ''}
                     </div>
