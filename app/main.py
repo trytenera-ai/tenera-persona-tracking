@@ -2,6 +2,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi import Request
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -55,7 +57,16 @@ templates = Jinja2Templates(directory=str(_APP_DIR / "templates"))
 # --- Minimal UI routes ---
 
 
-from fastapi import Request
+@app.options("/{path:path}", include_in_schema=False)
+async def options_any(path: str):
+    # Keep probes/preflight from surfacing as noisy 405s in browser devtools.
+    return Response(status_code=204)
+
+
+@app.head("/{path:path}", include_in_schema=False)
+async def head_any(path: str):
+    # FastAPI/Starlette can still emit 405 for HEAD on some routes behind proxies.
+    return Response(status_code=200)
 
 
 @app.get("/")
