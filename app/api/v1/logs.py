@@ -48,6 +48,27 @@ def _event_env_clause(env: str):
     return or_(props.is_(None), not_(staging))
 
 
+def _event_property_clause(key: str, value: str):
+    return or_(
+        Event.properties.icontains(f'"{key}":"{value}"'),
+        Event.properties.icontains(f'"{key}": "{value}"'),
+    )
+
+
+def _event_org_clause(org_name: str):
+    return or_(
+        _event_property_clause("organization_name", org_name),
+        _event_property_clause("org_name", org_name),
+    )
+
+
+def _event_project_clause(project_name: str):
+    return or_(
+        _event_property_clause("project_name", project_name),
+        _event_property_clause("project", project_name),
+    )
+
+
 @router.get("/stats")
 async def get_stats(
     distinct_id: Optional[str] = Query(None),
@@ -57,6 +78,8 @@ async def get_stats(
         default=None, description="Comma-separated distinct_id prefixes to hide"
     ),
     exclude_prefixes_logic: str = Query(default="or", pattern="^(or|and)$"),
+    organization_name: Optional[str] = Query(default=None),
+    project_name: Optional[str] = Query(default=None),
     _: str = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ):
@@ -77,6 +100,10 @@ async def get_stats(
         q = q.where(prefix_clause)
     if env:
         q = q.where(_event_env_clause(env))
+    if organization_name:
+        q = q.where(_event_org_clause(organization_name))
+    if project_name:
+        q = q.where(_event_project_clause(project_name))
 
     total = (await db.execute(q)).scalar_one()
 
@@ -100,6 +127,8 @@ async def get_activity(
         default=None, description="Comma-separated distinct_id prefixes to hide"
     ),
     exclude_prefixes_logic: str = Query(default="or", pattern="^(or|and)$"),
+    organization_name: Optional[str] = Query(default=None),
+    project_name: Optional[str] = Query(default=None),
     _: str = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ):
@@ -124,6 +153,10 @@ async def get_activity(
         q = q.where(prefix_clause)
     if env:
         q = q.where(_event_env_clause(env))
+    if organization_name:
+        q = q.where(_event_org_clause(organization_name))
+    if project_name:
+        q = q.where(_event_project_clause(project_name))
 
     rows = (await db.execute(q)).scalars().all()
 

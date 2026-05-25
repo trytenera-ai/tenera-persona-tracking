@@ -232,6 +232,14 @@
             <select id="user-filter-select" onchange="onUserFilterChange(this.value)">
                 <option value="">All users</option>
             </select>
+            <label for="org-filter-select">Organization</label>
+            <select id="org-filter-select" onchange="onOrgFilterChange(this.value)">
+                <option value="">All organizations</option>
+            </select>
+            <label for="project-filter-select">Project</label>
+            <select id="project-filter-select" onchange="onProjectFilterChange(this.value)">
+                <option value="">All projects</option>
+            </select>
         </div>
 
         <!-- Stats -->
@@ -361,6 +369,8 @@
         if (hideAnonymous) params.set('hide_anonymous', 'true');
         if (excludedPrefixes.length) params.set('exclude_prefixes', excludedPrefixes.join(','));
         params.set('exclude_prefixes_logic', excludedPrefixesLogic);
+        if (activeOrgFilter) params.set('organization_name', activeOrgFilter);
+        if (activeProjectFilter) params.set('project_name', activeProjectFilter);
         for (const [key, value] of Object.entries(extra)) {
             if (value !== null && value !== undefined && value !== '') params.set(key, value);
         }
@@ -745,6 +755,18 @@
     }
 
     let activePersonaFilter = null;
+    let activeOrgFilter = null;
+    let activeProjectFilter = null;
+
+    function rowOrgName(r) {
+        const meta = r && r.metadata ? r.metadata : {};
+        return (meta.organization_name || meta.org_name || meta.organization || '').trim();
+    }
+
+    function rowProjectName(r) {
+        const meta = r && r.metadata ? r.metadata : {};
+        return (meta.project_name || meta.project || '').trim();
+    }
 
     function populateUserFilter(personas) {
         const sel = document.getElementById('user-filter-select');
@@ -765,6 +787,47 @@
         loadLogs();
     }
 
+    function onOrgFilterChange(val) {
+        activeOrgFilter = val || null;
+        loadPersonas();
+        loadLogs();
+    }
+
+    function onProjectFilterChange(val) {
+        activeProjectFilter = val || null;
+        loadPersonas();
+        loadLogs();
+    }
+
+    function populateOrgProjectFilters(rows) {
+        const orgSel = document.getElementById('org-filter-select');
+        const projectSel = document.getElementById('project-filter-select');
+        const prevOrg = orgSel.value;
+        const prevProject = projectSel.value;
+
+        const orgs = Array.from(new Set((rows || []).map(rowOrgName).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+        const projects = Array.from(new Set((rows || []).map(rowProjectName).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+
+        orgSel.innerHTML = '<option value="">All organizations</option>';
+        for (const org of orgs) {
+            const opt = document.createElement('option');
+            opt.value = org;
+            opt.textContent = org;
+            orgSel.appendChild(opt);
+        }
+
+        projectSel.innerHTML = '<option value="">All projects</option>';
+        for (const project of projects) {
+            const opt = document.createElement('option');
+            opt.value = project;
+            opt.textContent = project;
+            projectSel.appendChild(opt);
+        }
+
+        if (prevOrg && orgs.includes(prevOrg)) orgSel.value = prevOrg;
+        if (prevProject && projects.includes(prevProject)) projectSel.value = prevProject;
+    }
+
     function filterByPersona(distinctId) {
         activePersonaFilter = distinctId;
         const sel = document.getElementById('user-filter-select');
@@ -775,12 +838,21 @@
     async function loadLogs() {
         const did = activePersonaFilter || undefined;
 
-        const [stats, activity, failed_actions, failed] = await Promise.all([
-            fetchJSON(`/api/v1/logs/stats?${dashboardQuery({ distinct_id: did })}`),
-            fetchJSON(`/api/v1/logs/activity?${dashboardQuery({ limit: 100, distinct_id: did })}`),
-            fetchJSON(`/api/v1/logs/activity?${dashboardQuery({ limit: 50, saved: false, distinct_id: did })}`),
+        const scoped = {
+            distinct_id: did,
+            organization_name: activeOrgFilter || undefined,
+            project_name: activeProjectFilter || undefined,
+        };
+
+        const [stats, allActivity, activity, failed_actions, failed] = await Promise.all([
+            fetchJSON(`/api/v1/logs/stats?${dashboardQuery(scoped)}`),
+            fetchJSON(`/api/v1/logs/activity?${dashboardQuery({ limit: 300, distinct_id: did })}`),
+            fetchJSON(`/api/v1/logs/activity?${dashboardQuery({ limit: 100, ...scoped })}`),
+            fetchJSON(`/api/v1/logs/activity?${dashboardQuery({ limit: 50, saved: false, ...scoped })}`),
             fetchJSON('/api/v1/logs/failed-events?limit=50'),
         ]);
+
+        populateOrgProjectFilters(allActivity || []);
 
         if (stats) {
             document.getElementById('ls-total').textContent = stats.total_24h.toLocaleString();
