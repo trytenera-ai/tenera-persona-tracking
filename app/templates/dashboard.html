@@ -724,7 +724,10 @@
             </div>`;
         }
         const icon = { identify: '&#x1F464;', alias: '&#x1F517;', record_session: '&#x25B6;' }[r.action] || '&#x22EF;';
-        return `<div class="act-thumb-placeholder">${icon}</div>`;
+        return `<div class="act-url-preview" title="${r.action}">
+            <div class="url-domain" style="font-size:9px;opacity:0.5">event</div>
+            <div class="url-path" style="font-size:18px;line-height:1">${icon}</div>
+        </div>`;
     }
 
     function renderActivityTable(rows, containerId, failedOnly) {
