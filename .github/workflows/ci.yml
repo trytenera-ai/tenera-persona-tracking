@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [staging, main]
+  push:
+    branches: [staging, main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: Lint changed API surface
+        run: ruff check app/api/v1/events.py
+
+      - name: Import and route smoke test
+        run: |
+          python - <<'PY'
+          from app.main import app
+          routes = {getattr(route, 'path', '') for route in app.routes}
+          assert '/api/v1/track' in routes
+          assert '/api/v1/identify' in routes
+          print('app import and public ingest routes ok')
+          PY
