@@ -51,6 +51,7 @@ Edit `.env` and set at least:
 ```dotenv
 API_KEY=your-read-write-admin-key
 WRITE_KEY=your-browser-safe-ingestion-key
+TPT_ACCESS_CODE=optional-dashboard-docs-code
 DATABASE_MODE=sqlite
 ```
 
@@ -119,6 +120,7 @@ Recommended identity convention: use a stable `distinct_id`, such as an internal
 ```dotenv
 API_KEY=your-read-write-admin-key
 WRITE_KEY=your-browser-safe-ingestion-key
+TPT_ACCESS_CODE=optional-dashboard-docs-code
 DATABASE_MODE=sqlite
 DATABASE_URL=postgresql+asyncpg://... # optional, for Supabase/Postgres mode
 SUPABASE_URL=https://your-project.supabase.co # optional screenshot storage
@@ -218,6 +220,7 @@ For production:
 
 - Set `DATABASE_MODE=supabase` and provide `DATABASE_URL`.
 - Set a strong `API_KEY` and separate `WRITE_KEY`.
+- Set `TPT_ACCESS_CODE` to protect the browser dashboard and docs; change this environment variable whenever you need to rotate access.
 - Configure `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` if you want screenshot storage.
 - Keep `API_KEY` server-side only; expose only `WRITE_KEY` to browsers.
 - If sharing a Supabase database across environments, set `DB_SCHEMA` (`public`, `staging`, `dev`, etc.).
