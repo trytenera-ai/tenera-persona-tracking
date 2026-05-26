@@ -559,11 +559,43 @@
 
     // ── Session event cache ───────────────────────────────────────────────────
     const _sessionCache = {};
+
+    function stripExecutableReplayNodes(node) {
+        if (!node || typeof node !== 'object') return node;
+        if (String(node.tagName || '').toLowerCase() === 'script') return null;
+        if (Array.isArray(node.childNodes)) {
+            node.childNodes = node.childNodes
+                .map(stripExecutableReplayNodes)
+                .filter(Boolean);
+        }
+        return node;
+    }
+
+    function sanitizeReplayEvents(events) {
+        // rrweb replays DOM snapshots inside a sandboxed iframe. Script tags are
+        // intentionally blocked there, but browsers still spam the console with
+        // "Blocked script execution ... allow-scripts" warnings for every replayed
+        // script. We remove script nodes from replay data because they are not
+        // needed for visual session playback and should never execute in previews.
+        return (events || []).map(event => {
+            const copy = JSON.parse(JSON.stringify(event));
+            if (copy.data && copy.data.node) {
+                copy.data.node = stripExecutableReplayNodes(copy.data.node);
+            }
+            if (copy.data && Array.isArray(copy.data.adds)) {
+                copy.data.adds = copy.data.adds
+                    .map(add => ({ ...add, node: stripExecutableReplayNodes(add.node) }))
+                    .filter(add => add.node);
+            }
+            return copy;
+        });
+    }
+
     async function ensureSessionEvents(sessionId) {
         if (!(sessionId in _sessionCache)) {
             const data = await fetchJSON(`/api/v1/sessions/${sessionId}/events`);
             _sessionCache[sessionId] = (data && data.events && data.events.length >= 2)
-                ? data.events : null;
+                ? sanitizeReplayEvents(data.events) : null;
         }
         return _sessionCache[sessionId];
     }
