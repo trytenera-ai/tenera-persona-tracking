@@ -562,7 +562,12 @@
 
     function stripExecutableReplayNodes(node) {
         if (!node || typeof node !== 'object') return node;
-        if (String(node.tagName || '').toLowerCase() === 'script') return null;
+        const tag = String(node.tagName || '').toLowerCase();
+        if (tag === 'script') return null;
+        if (tag === 'link') {
+            const rel = String((node.attributes && node.attributes.rel) || '').toLowerCase();
+            if (rel === 'preload' || rel === 'modulepreload') return null;
+        }
         if (Array.isArray(node.childNodes)) {
             node.childNodes = node.childNodes
                 .map(stripExecutableReplayNodes)
@@ -651,28 +656,16 @@
 
     // ── Lazy thumbnail loader ─────────────────────────────────────────────────
     function initThumbObserver() {
-        const obs = new IntersectionObserver(async (entries) => {
-            for (const { isIntersecting, target: el } of entries) {
-                if (!isIntersecting || el.dataset.loaded) continue;
-                el.dataset.loaded = '1';
-                obs.unobserve(el);
-                const events = await ensureSessionEvents(el.dataset.session);
-                if (!events) return;
-                el.innerHTML = '';
-                const player = new rrwebPlayer({
-                    target: el,
-                    props: { events, width: 1080, height: 680, autoPlay: false, showController: false }
-                });
-                // Seek thumbnail to the moment of this specific event
-                if (el.dataset.ts && events.length) {
-                    const offset = Math.max(0, parseInt(el.dataset.ts, 10) - events[0].timestamp);
-                    if (offset > 0) {
-                        setTimeout(() => { try { player.goto(offset); } catch(e) {} }, 150);
-                    }
-                }
-            }
-        }, { rootMargin: '300px' });
-        document.querySelectorAll('.act-thumb-wrap[data-session]').forEach(el => obs.observe(el));
+        // Do not instantiate rrweb players for feed thumbnails. Each rrweb player
+        // creates a sandboxed iframe; replaying many thumbnails can flood the
+        // browser console with sandbox/script warnings from recorded pages. Keep
+        // the feed as lightweight placeholders and only create one sanitized
+        // replay iframe when the user explicitly opens the modal.
+        document.querySelectorAll('.act-thumb-wrap[data-session]').forEach(el => {
+            if (el.dataset.loaded) return;
+            el.dataset.loaded = '1';
+            el.innerHTML = '<div class="act-thumb-placeholder">&#x25B6;<br><span>Replay</span></div>';
+        });
     }
 
     // ── Thumbnail rendering ────────────────────────────────────────────────────
