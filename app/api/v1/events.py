@@ -36,6 +36,33 @@ class IdentifyResponse(BaseModel):
     persona_id: str
 
 
+def _canonical_project_names() -> dict[str, str]:
+    raw = settings.canonical_projects_json
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {
+        str(k).strip(): str(v).strip()
+        for k, v in parsed.items()
+        if str(k).strip() and str(v).strip()
+    }
+
+
+def _apply_canonical_scope(scope: dict) -> dict:
+    project_id = scope.get("project_id")
+    if not project_id:
+        return scope
+    canonical_name = _canonical_project_names().get(str(project_id))
+    if canonical_name:
+        scope["project_name"] = canonical_name
+    return scope
+
+
 def _header_scope(request: Request) -> dict:
     def _v(name: str) -> str | None:
         raw = request.headers.get(name)
@@ -44,13 +71,13 @@ def _header_scope(request: Request) -> dict:
         trimmed = raw.strip()
         return trimmed or None
 
-    return {
+    return _apply_canonical_scope({
         "organization_id": _v("x-tpt-organization-id"),
         "organization_name": _v("x-tpt-organization-name"),
         "organization_domain": _v("x-tpt-organization-domain"),
         "project_id": _v("x-tpt-project-id"),
         "project_name": _v("x-tpt-project-name"),
-    }
+    })
 
 
 async def upload_screenshot(b64: str) -> Optional[str]:
@@ -117,6 +144,7 @@ async def track_event(
     merged_props = dict(scope)
     if body.properties:
         merged_props.update(body.properties)
+    _apply_canonical_scope(merged_props)
 
     event = Event(
         persona_id=persona.id,

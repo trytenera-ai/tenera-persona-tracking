@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -23,6 +22,11 @@ class Settings(BaseSettings):
     api_key: str = "change-me-in-production"
     # Write-only key — safe to embed in browser JS (only grants access to /track)
     write_key: Optional[str] = None
+
+    # Optional JSON object mapping project IDs to canonical display names.
+    # Example: {"cmp...": "Tenera Team"}. The server applies this at ingest
+    # so stale browser bundles cannot keep writing an old project_name label.
+    canonical_projects_json: Optional[str] = None
 
     # LLM for cluster NER + summarization (via litellm)
     anthropic_api_key: Optional[str] = None
