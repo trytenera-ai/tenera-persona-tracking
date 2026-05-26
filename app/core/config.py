@@ -20,6 +20,8 @@ class Settings(BaseSettings):
 
     # Auth
     api_key: str = "change-me-in-production"
+    # Browser-facing dashboard/docs access code. Set to empty to disable this UI gate.
+    tpt_access_code: Optional[str] = "teneraincadmin"
     # Write-only key — safe to embed in browser JS (only grants access to /track)
     write_key: Optional[str] = None
 
