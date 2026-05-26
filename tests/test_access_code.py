@@ -1,3 +1,7 @@
+import os
+
+os.environ["TPT_ACCESS_CODE"] = "teneraincadmin"
+
 from fastapi.testclient import TestClient
 
 from app.main import app
