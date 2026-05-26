@@ -17,6 +17,7 @@ def test_valid_access_code_sets_cookie_and_allows_dashboard():
 
         assert response.status_code == 303
         assert response.cookies.get("tpt_access") == "1"
+        assert response.headers["location"] == "/"
 
         client.cookies.set("tpt_access", "1")
         dashboard = client.get("/")
