@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlencode
 
 from fastapi import FastAPI
 from fastapi import Request
@@ -129,8 +130,11 @@ def _require_dashboard_access(request: Request) -> Optional[Response]:
 
     url_code = request.query_params.get("code")
     if _has_valid_access_code(url_code):
-        clean_url = request.url.remove_query_params(["code"])
-        response = RedirectResponse(str(clean_url), status_code=303)
+        remaining_params = [(k, v) for k, v in request.query_params.multi_items() if k != "code"]
+        clean_url = request.url.path
+        if remaining_params:
+            clean_url += "?" + urlencode(remaining_params)
+        response = RedirectResponse(clean_url, status_code=303)
         response.set_cookie(ACCESS_COOKIE, "1", max_age=604800, httponly=True, samesite="lax")
         return response
 
