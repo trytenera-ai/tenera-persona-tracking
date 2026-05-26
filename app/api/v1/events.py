@@ -53,6 +53,52 @@ def _header_scope(request: Request) -> dict:
     }
 
 
+
+def _project_name_score(name: Optional[str]) -> int:
+    normalized = (name or "").strip().lower()
+    if not normalized:
+        return 0
+    # Placeholder labels should not override a previously observed real name
+    # for the same project_id. This is generic: if a client's real project is
+    # actually named "Test", it is still kept unless a better label exists.
+    if normalized in {"test", "demo", "default", "unknown", "project"}:
+        return 1
+    return 10 + min(len(normalized), 80)
+
+
+async def _best_known_project_name(
+    db: AsyncSession, project_id: Optional[str], incoming_name: Optional[str]
+) -> Optional[str]:
+    if not project_id:
+        return incoming_name
+
+    best_name = (incoming_name or "").strip() or None
+    best_score = _project_name_score(best_name)
+
+    result = await db.execute(
+        select(Event.properties)
+        .where(
+            Event.properties.is_not(None),
+            Event.properties.icontains(f'"project_id": "{project_id}"'),
+        )
+        .order_by(Event.timestamp.desc())
+        .limit(200)
+    )
+    for raw_props in result.scalars().all():
+        try:
+            props = json.loads(raw_props) if raw_props else {}
+        except json.JSONDecodeError:
+            continue
+        if str(props.get("project_id") or "").strip() != project_id:
+            continue
+        candidate = str(props.get("project_name") or props.get("project") or "").strip()
+        score = _project_name_score(candidate)
+        if candidate and score > best_score:
+            best_name = candidate
+            best_score = score
+
+    return best_name
+
 async def upload_screenshot(b64: str) -> Optional[str]:
     """Upload a base64-encoded image to Supabase Storage and return the public URL.
 
@@ -117,6 +163,13 @@ async def track_event(
     merged_props = dict(scope)
     if body.properties:
         merged_props.update(body.properties)
+    best_project_name = await _best_known_project_name(
+        db,
+        merged_props.get("project_id"),
+        merged_props.get("project_name") or merged_props.get("project"),
+    )
+    if best_project_name:
+        merged_props["project_name"] = best_project_name
 
     event = Event(
         persona_id=persona.id,

@@ -69,6 +69,10 @@ def _event_project_clause(project_name: str):
     )
 
 
+def _event_project_id_clause(project_id: str):
+    return _event_property_clause("project_id", project_id)
+
+
 @router.get("/stats")
 async def get_stats(
     distinct_id: Optional[str] = Query(None),
@@ -80,6 +84,7 @@ async def get_stats(
     exclude_prefixes_logic: str = Query(default="or", pattern="^(or|and)$"),
     organization_name: Optional[str] = Query(default=None),
     project_name: Optional[str] = Query(default=None),
+    project_id: Optional[str] = Query(default=None),
     _: str = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ):
@@ -102,7 +107,9 @@ async def get_stats(
         q = q.where(_event_env_clause(env))
     if organization_name:
         q = q.where(_event_org_clause(organization_name))
-    if project_name:
+    if project_id:
+        q = q.where(_event_project_id_clause(project_id))
+    elif project_name:
         q = q.where(_event_project_clause(project_name))
 
     total = (await db.execute(q)).scalar_one()
@@ -129,6 +136,7 @@ async def get_activity(
     exclude_prefixes_logic: str = Query(default="or", pattern="^(or|and)$"),
     organization_name: Optional[str] = Query(default=None),
     project_name: Optional[str] = Query(default=None),
+    project_id: Optional[str] = Query(default=None),
     _: str = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ):
@@ -155,7 +163,9 @@ async def get_activity(
         q = q.where(_event_env_clause(env))
     if organization_name:
         q = q.where(_event_org_clause(organization_name))
-    if project_name:
+    if project_id:
+        q = q.where(_event_project_id_clause(project_id))
+    elif project_name:
         q = q.where(_event_project_clause(project_name))
 
     rows = (await db.execute(q)).scalars().all()

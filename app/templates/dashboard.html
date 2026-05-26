@@ -370,7 +370,7 @@
         if (excludedPrefixes.length) params.set('exclude_prefixes', excludedPrefixes.join(','));
         params.set('exclude_prefixes_logic', excludedPrefixesLogic);
         if (activeOrgFilter) params.set('organization_name', activeOrgFilter);
-        if (activeProjectFilter) params.set('project_name', activeProjectFilter);
+        if (activeProjectFilter) params.set('project_id', activeProjectFilter);
         for (const [key, value] of Object.entries(extra)) {
             if (value !== null && value !== undefined && value !== '') params.set(key, value);
         }
@@ -398,7 +398,7 @@
         const query = dashboardQuery({ limit: 200 });
         const scoped = {
             organization_name: activeOrgFilter || undefined,
-            project_name: activeProjectFilter || undefined,
+            project_id: activeProjectFilter || undefined,
         };
         const [personas, sessions, scopeRows] = await Promise.all([
             fetchJSON(`/api/v1/personas?${query}`),
@@ -406,12 +406,14 @@
             fetchJSON(`/api/v1/logs/activity?${dashboardQuery({ limit: 500, ...scoped })}`),
         ]);
 
+        populateOrgProjectFilters(scopeRows || []);
+
         const personaScopeByDistinct = new Map();
         for (const r of (scopeRows || [])) {
             if (!r?.distinct_id || personaScopeByDistinct.has(r.distinct_id)) continue;
             personaScopeByDistinct.set(r.distinct_id, {
                 org: rowOrgName(r) || '—',
-                project: rowProjectName(r) || '—',
+                project: rowProjectLabel(r) || '—',
             });
         }
 
@@ -759,7 +761,7 @@
                         <span class="act-who">${r.distinct_id}</span>
                         <span class="act-time" title="${exact}">${ago}</span>
                         ${rowOrgName(r) ? `<span class="act-page" title="Organization">${rowOrgName(r)}</span>` : ''}
-                        ${rowProjectName(r) ? `<span class="act-page" title="Project">${rowProjectName(r)}</span>` : ''}
+                        ${rowProjectLabel(r) ? `<span class="act-page" title="Project">${rowProjectLabel(r)}</span>` : ''}
                         ${page !== '--' ? `<span class="act-page" title="${pageUrl}">${page}</span>` : ''}
                         ${sessionId ? `<span class="act-session-badge" title="Session ${sessionId}">${sessionId.slice(0, 8)}</span>` : ''}
                     </div>
@@ -804,15 +806,35 @@
     let activePersonaFilter = null;
     let activeOrgFilter = null;
     let activeProjectFilter = null;
+    const projectLabelById = new Map();
 
     function rowOrgName(r) {
         const meta = r && r.metadata ? r.metadata : {};
         return (meta.organization_name || meta.org_name || meta.organization || '').trim();
     }
 
+    function rowProjectId(r) {
+        const meta = r && r.metadata ? r.metadata : {};
+        return (meta.project_id || '').trim();
+    }
+
     function rowProjectName(r) {
         const meta = r && r.metadata ? r.metadata : {};
         return (meta.project_name || meta.project || '').trim();
+    }
+
+    function projectNameScore(name) {
+        const n = String(name || '').trim().toLowerCase();
+        if (!n) return 0;
+        // Generic placeholder names are useful only when no better name exists.
+        if (['test', 'demo', 'default', 'unknown', 'project'].includes(n)) return 1;
+        return 10 + Math.min(n.length, 80);
+    }
+
+    function rowProjectLabel(r) {
+        const id = rowProjectId(r);
+        if (id && projectLabelById.has(id)) return projectLabelById.get(id);
+        return rowProjectName(r);
     }
 
     function populateUserFilter(personas) {
@@ -853,7 +875,21 @@
         const prevProject = projectSel.value;
 
         const orgs = Array.from(new Set((rows || []).map(rowOrgName).filter(Boolean))).sort((a, b) => a.localeCompare(b));
-        const projects = Array.from(new Set((rows || []).map(rowProjectName).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+        const projectsById = new Map();
+        for (const row of (rows || [])) {
+            const id = rowProjectId(row);
+            const name = rowProjectName(row);
+            if (!id && !name) continue;
+            const key = id || `name:${name}`;
+            const prev = projectsById.get(key);
+            const candidate = { id: key, label: name || id, score: projectNameScore(name) };
+            if (!prev || candidate.score > prev.score) projectsById.set(key, candidate);
+        }
+        projectLabelById.clear();
+        for (const project of projectsById.values()) {
+            if (!String(project.id).startsWith('name:')) projectLabelById.set(project.id, project.label);
+        }
+        const projects = Array.from(projectsById.values()).sort((a, b) => a.label.localeCompare(b.label));
 
         orgSel.innerHTML = '<option value="">All organizations</option>';
         for (const org of orgs) {
@@ -866,13 +902,13 @@
         projectSel.innerHTML = '<option value="">All projects</option>';
         for (const project of projects) {
             const opt = document.createElement('option');
-            opt.value = project;
-            opt.textContent = project;
+            opt.value = project.id;
+            opt.textContent = project.label;
             projectSel.appendChild(opt);
         }
 
         if (prevOrg && orgs.includes(prevOrg)) orgSel.value = prevOrg;
-        if (prevProject && projects.includes(prevProject)) projectSel.value = prevProject;
+        if (prevProject && projects.some(project => project.id === prevProject)) projectSel.value = prevProject;
     }
 
     function filterByPersona(distinctId) {
@@ -888,7 +924,7 @@
         const scoped = {
             distinct_id: did,
             organization_name: activeOrgFilter || undefined,
-            project_name: activeProjectFilter || undefined,
+            project_id: activeProjectFilter || undefined,
         };
 
         const [stats, allActivity, activity, failed_actions, failed] = await Promise.all([
