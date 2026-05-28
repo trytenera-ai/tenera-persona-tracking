@@ -3,6 +3,14 @@ name: DB Migrate
 on:
   push:
     branches: [staging, main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment (staging or production)"
+        required: true
+        default: staging
+        type: choice
+        options: [staging, production]
 
 jobs:
   migrate:
@@ -19,13 +27,13 @@ jobs:
         run: pip install -e .
 
       - name: Run migrations (staging)
-        if: github.ref == 'refs/heads/staging'
+        if: github.ref == 'refs/heads/staging' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
         env:
           DATABASE_URL: ${{ secrets.STAGING_SUPABASE_DATABASE_URL }}
         run: alembic upgrade head
 
       - name: Run migrations (production)
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
         env:
           DATABASE_URL: ${{ secrets.PROD_SUPABASE_DATABASE_URL }}
         run: alembic upgrade head
