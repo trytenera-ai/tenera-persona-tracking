@@ -20,49 +20,24 @@ def upgrade() -> None:
     op.create_table(
         "personas",
         sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("distinct_id", sa.String(255), nullable=False, unique=True, index=True),
+        sa.Column("distinct_id", sa.String(255), nullable=False),
         sa.Column("name", sa.String(255), nullable=True),
         sa.Column("description", sa.Text, nullable=True),
         sa.Column("is_anonymous", sa.Boolean, nullable=False, server_default="false"),
-        sa.Column(
-            "created_at",
-            sa.DateTime(timezone=True),
-            nullable=False,
-            server_default=sa.text("now()"),
-        ),
-        sa.Column(
-            "updated_at",
-            sa.DateTime(timezone=True),
-            nullable=False,
-            server_default=sa.text("now()"),
-        ),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.UniqueConstraint("distinct_id", name="uq_personas_distinct_id"),
     )
     op.create_index("ix_personas_distinct_id", "personas", ["distinct_id"])
 
     op.create_table(
         "entities",
         sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column(
-            "persona_id",
-            sa.String(36),
-            sa.ForeignKey("personas.id", ondelete="CASCADE"),
-            nullable=False,
-            index=True,
-        ),
+        sa.Column("persona_id", sa.String(36), sa.ForeignKey("personas.id", ondelete="CASCADE"), nullable=False),
         sa.Column("key", sa.String(255), nullable=False),
         sa.Column("value", sa.Text, nullable=False),
-        sa.Column(
-            "created_at",
-            sa.DateTime(timezone=True),
-            nullable=False,
-            server_default=sa.text("now()"),
-        ),
-        sa.Column(
-            "updated_at",
-            sa.DateTime(timezone=True),
-            nullable=False,
-            server_default=sa.text("now()"),
-        ),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.UniqueConstraint("persona_id", "key", name="uq_persona_entity_key"),
     )
     op.create_index("ix_entities_persona_id", "entities", ["persona_id"])
@@ -70,22 +45,10 @@ def upgrade() -> None:
     op.create_table(
         "events",
         sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column(
-            "persona_id",
-            sa.String(36),
-            sa.ForeignKey("personas.id", ondelete="CASCADE"),
-            nullable=False,
-            index=True,
-        ),
-        sa.Column("event_type", sa.String(255), nullable=False, index=True),
+        sa.Column("persona_id", sa.String(36), sa.ForeignKey("personas.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("event_type", sa.String(255), nullable=False),
         sa.Column("properties", sa.Text, nullable=True),
-        sa.Column(
-            "timestamp",
-            sa.DateTime(timezone=True),
-            nullable=False,
-            server_default=sa.text("now()"),
-            index=True,
-        ),
+        sa.Column("timestamp", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("screenshot_url", sa.Text, nullable=True),
     )
     op.create_index("ix_events_persona_id", "events", ["persona_id"])
@@ -95,52 +58,20 @@ def upgrade() -> None:
     op.create_table(
         "sessions",
         sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column(
-            "persona_id",
-            sa.String(36),
-            sa.ForeignKey("personas.id"),
-            nullable=False,
-            index=True,
-        ),
+        sa.Column("persona_id", sa.String(36), sa.ForeignKey("personas.id"), nullable=False),
         sa.Column("url", sa.Text, nullable=True),
-        sa.Column(
-            "created_at",
-            sa.DateTime(timezone=True),
-            nullable=False,
-            server_default=sa.text("now()"),
-        ),
-        sa.Column(
-            "updated_at",
-            sa.DateTime(timezone=True),
-            nullable=False,
-            server_default=sa.text("now()"),
-        ),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
     op.create_index("ix_sessions_persona_id", "sessions", ["persona_id"])
 
     op.create_table(
         "session_event_batches",
         sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column(
-            "session_id",
-            sa.String(36),
-            sa.ForeignKey("sessions.id"),
-            nullable=False,
-            index=True,
-        ),
+        sa.Column("session_id", sa.String(36), sa.ForeignKey("sessions.id"), nullable=False),
         sa.Column("events_json", sa.Text, nullable=False),
-        sa.Column(
-            "created_at",
-            sa.DateTime(timezone=True),
-            nullable=False,
-            server_default=sa.text("now()"),
-        ),
-        sa.Column(
-            "updated_at",
-            sa.DateTime(timezone=True),
-            nullable=False,
-            server_default=sa.text("now()"),
-        ),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
     op.create_index("ix_session_event_batches_session_id", "session_event_batches", ["session_id"])
 
@@ -155,31 +86,14 @@ def upgrade() -> None:
         sa.Column("calinski_harabasz", sa.String(20), nullable=True),
         sa.Column("davies_bouldin", sa.String(20), nullable=True),
         sa.Column("cluster_summaries", sa.Text, nullable=True),
-        sa.Column(
-            "created_at",
-            sa.DateTime(timezone=True),
-            nullable=False,
-            server_default=sa.text("now()"),
-        ),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
 
     op.create_table(
         "cluster_assignments",
         sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column(
-            "run_id",
-            sa.String(36),
-            sa.ForeignKey("cluster_runs.id", ondelete="CASCADE"),
-            nullable=False,
-            index=True,
-        ),
-        sa.Column(
-            "persona_id",
-            sa.String(36),
-            sa.ForeignKey("personas.id", ondelete="CASCADE"),
-            nullable=False,
-            index=True,
-        ),
+        sa.Column("run_id", sa.String(36), sa.ForeignKey("cluster_runs.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("persona_id", sa.String(36), sa.ForeignKey("personas.id", ondelete="CASCADE"), nullable=False),
         sa.Column("cluster_label", sa.Integer, nullable=False),
         sa.Column("cluster_name", sa.String(255), nullable=True),
     )
