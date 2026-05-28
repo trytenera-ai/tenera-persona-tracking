@@ -243,12 +243,21 @@
         </div>
 
         <!-- Stats -->
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+            <label style="font-size:13px;color:#6c6258;font-weight:500;">Time range</label>
+            <select id="time-range-select" onchange="onTimeRangeChange(this.value)" style="font-size:13px;padding:4px 8px;border-radius:6px;border:1px solid #d0c8bc;background:#fff;cursor:pointer;">
+                <option value="24">Last 24h</option>
+                <option value="168">Last 7 days</option>
+                <option value="720">Last 30 days</option>
+                <option value="0">All time</option>
+            </select>
+        </div>
         <div class="stats-row" id="log-stats-row">
-            <div class="stat-card"><div class="num" id="ls-total">--</div><div class="lbl">Actions (24h)</div></div>
-            <div class="stat-card"><div class="num" id="ls-saved">--</div><div class="lbl">Saved (24h)</div></div>
-            <div class="stat-card warn"><div class="num" id="ls-failed-actions">--</div><div class="lbl">Failed (24h)</div></div>
+            <div class="stat-card"><div class="num" id="ls-total">--</div><div class="lbl" id="ls-lbl-total">Actions (24h)</div></div>
+            <div class="stat-card"><div class="num" id="ls-saved">--</div><div class="lbl" id="ls-lbl-saved">Saved (24h)</div></div>
+            <div class="stat-card warn"><div class="num" id="ls-failed-actions">--</div><div class="lbl" id="ls-lbl-failed">Failed (24h)</div></div>
             <div class="stat-card"><div class="num" id="ls-rate">--</div><div class="lbl">Success rate</div></div>
-            <div class="stat-card err"><div class="num" id="ls-failed">--</div><div class="lbl">Batch failures (24h)</div></div>
+            <div class="stat-card err"><div class="num" id="ls-failed">--</div><div class="lbl" id="ls-lbl-batch">Batch failures (24h)</div></div>
         </div>
 
         <!-- Failed actions -->
@@ -918,24 +927,49 @@
         switchTab('logs');
     }
 
+    let activeTimeHours = 24;
+
+    function onTimeRangeChange(val) {
+        activeTimeHours = parseInt(val, 10);
+        loadLogs();
+    }
+
+    function timeLabel() {
+        if (activeTimeHours === 0) return 'All time';
+        if (activeTimeHours === 24) return '24h';
+        if (activeTimeHours === 168) return '7d';
+        if (activeTimeHours === 720) return '30d';
+        return `${activeTimeHours}h`;
+    }
+
     async function loadLogs() {
         const did = activePersonaFilter || undefined;
+        const hoursParam = activeTimeHours > 0 ? activeTimeHours : undefined;
 
         const scoped = {
             distinct_id: did,
             organization_name: activeOrgFilter || undefined,
             project_id: activeProjectFilter || undefined,
+            hours: hoursParam,
         };
+
+        const activityLimit = activeTimeHours === 0 ? 500 : 100;
 
         const [stats, allActivity, activity, failed_actions, failed] = await Promise.all([
             fetchJSON(`/api/v1/logs/stats?${dashboardQuery(scoped)}`),
-            fetchJSON(`/api/v1/logs/activity?${dashboardQuery({ limit: 300, distinct_id: did })}`),
-            fetchJSON(`/api/v1/logs/activity?${dashboardQuery({ limit: 100, ...scoped })}`),
+            fetchJSON(`/api/v1/logs/activity?${dashboardQuery({ limit: 300, distinct_id: did, hours: hoursParam })}`),
+            fetchJSON(`/api/v1/logs/activity?${dashboardQuery({ limit: activityLimit, ...scoped })}`),
             fetchJSON(`/api/v1/logs/activity?${dashboardQuery({ limit: 50, saved: false, ...scoped })}`),
             fetchJSON('/api/v1/logs/failed-events?limit=50'),
         ]);
 
         populateOrgProjectFilters(allActivity || []);
+
+        const lbl = timeLabel();
+        ['ls-lbl-total', 'ls-lbl-saved', 'ls-lbl-failed', 'ls-lbl-batch'].forEach((id, i) => {
+            const labels = [`Actions (${lbl})`, `Saved (${lbl})`, `Failed (${lbl})`, `Batch failures (${lbl})`];
+            document.getElementById(id).textContent = labels[i];
+        });
 
         if (stats) {
             document.getElementById('ls-total').textContent = stats.total_24h.toLocaleString();
