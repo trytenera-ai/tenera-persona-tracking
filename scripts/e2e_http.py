@@ -327,6 +327,19 @@ def main() -> int:
         session_id = session["id"]
         checks.ok("session create", bool(session_id), "session create did not return ID")
 
+        reused_session = client.request(
+            "POST",
+            "/api/v1/sessions",
+            write=True,
+            expected=(201,),
+            body={"distinct_id": main_id, "url": base_url_for_env(cfg.env, run_id, "session-reload")},
+        )
+        checks.ok(
+            "active session reuse",
+            reused_session.get("id") == session_id and reused_session.get("reused") is True,
+            "active same-user session was not reused",
+        )
+
         now_ms = int(time.time() * 1000)
         rrweb_events = [
             {"type": 4, "timestamp": now_ms + 50, "data": {"href": base_url_for_env(cfg.env, run_id, "session"), "width": 1280, "height": 720}},

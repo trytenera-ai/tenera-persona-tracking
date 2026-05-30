@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -7,11 +8,33 @@ from sqlalchemy import and_, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import verify_api_key, verify_track_key
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.persona import Persona
 from app.models.session import Session, SessionEventBatch
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+
+MIN_SESSION_IDLE_TIMEOUT_SECONDS = 60
+MAX_SESSION_IDLE_TIMEOUT_SECONDS = 10 * 60 * 60
+SESSION_MAX_DURATION_SECONDS = 24 * 60 * 60
+
+
+def _session_idle_timeout_seconds() -> int:
+    desired = settings.session_idle_timeout_seconds
+    if desired < MIN_SESSION_IDLE_TIMEOUT_SECONDS:
+        return MIN_SESSION_IDLE_TIMEOUT_SECONDS
+    if desired > MAX_SESSION_IDLE_TIMEOUT_SECONDS:
+        return MAX_SESSION_IDLE_TIMEOUT_SECONDS
+    return desired
+
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _session_activity_column():
+    return func.coalesce(Session.updated_at, Session.created_at)
 
 
 def _is_anonymous_clause():
@@ -114,11 +137,38 @@ async def create_session(
         db.add(persona)
         await db.flush()
 
+    now = _now_utc()
+    idle_cutoff = now - timedelta(seconds=_session_idle_timeout_seconds())
+    max_duration_cutoff = now - timedelta(seconds=SESSION_MAX_DURATION_SECONDS)
+
+    reusable_result = await db.execute(
+        select(Session)
+        .where(
+            Session.persona_id == persona.id,
+            _session_activity_column() >= idle_cutoff,
+            Session.created_at >= max_duration_cutoff,
+        )
+        .order_by(_session_activity_column().desc(), Session.created_at.desc())
+        .limit(1)
+    )
+    reusable_session = reusable_result.scalar_one_or_none()
+    if reusable_session:
+        if body.url and reusable_session.url != body.url:
+            reusable_session.url = body.url
+        reusable_session.updated_at = now
+        await db.commit()
+        await db.refresh(reusable_session)
+        return {
+            "id": reusable_session.id,
+            "started_at": reusable_session.created_at.isoformat(),
+            "reused": True,
+        }
+
     session = Session(persona_id=persona.id, url=body.url)
     db.add(session)
     await db.commit()
     await db.refresh(session)
-    return {"id": session.id, "started_at": session.created_at.isoformat()}
+    return {"id": session.id, "started_at": session.created_at.isoformat(), "reused": False}
 
 
 @router.post("/{session_id}/events", status_code=204)
@@ -137,6 +187,7 @@ async def append_session_events(
 
     batch = SessionEventBatch(session_id=session_id, events_json=json.dumps(events))
     db.add(batch)
+    session.updated_at = _now_utc()
     await db.commit()
 
 
