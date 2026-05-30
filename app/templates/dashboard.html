@@ -243,12 +243,21 @@
         </div>
 
         <!-- Stats -->
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+            <label style="font-size:13px;color:#6c6258;font-weight:500;">Time range</label>
+            <select id="time-range-select" onchange="onTimeRangeChange(this.value)" style="font-size:13px;padding:4px 8px;border-radius:6px;border:1px solid #d0c8bc;background:#fff;cursor:pointer;">
+                <option value="24">Last 24h</option>
+                <option value="168">Last 7 days</option>
+                <option value="720">Last 30 days</option>
+                <option value="0">All time</option>
+            </select>
+        </div>
         <div class="stats-row" id="log-stats-row">
-            <div class="stat-card"><div class="num" id="ls-total">--</div><div class="lbl">Actions (24h)</div></div>
-            <div class="stat-card"><div class="num" id="ls-saved">--</div><div class="lbl">Saved (24h)</div></div>
-            <div class="stat-card warn"><div class="num" id="ls-failed-actions">--</div><div class="lbl">Failed (24h)</div></div>
+            <div class="stat-card"><div class="num" id="ls-total">--</div><div class="lbl" id="ls-lbl-total">Actions (24h)</div></div>
+            <div class="stat-card"><div class="num" id="ls-saved">--</div><div class="lbl" id="ls-lbl-saved">Saved (24h)</div></div>
+            <div class="stat-card warn"><div class="num" id="ls-failed-actions">--</div><div class="lbl" id="ls-lbl-failed">Failed (24h)</div></div>
             <div class="stat-card"><div class="num" id="ls-rate">--</div><div class="lbl">Success rate</div></div>
-            <div class="stat-card err"><div class="num" id="ls-failed">--</div><div class="lbl">Batch failures (24h)</div></div>
+            <div class="stat-card err"><div class="num" id="ls-failed">--</div><div class="lbl" id="ls-lbl-batch">Batch failures (24h)</div></div>
         </div>
 
         <!-- Failed actions -->
@@ -370,7 +379,7 @@
         if (excludedPrefixes.length) params.set('exclude_prefixes', excludedPrefixes.join(','));
         params.set('exclude_prefixes_logic', excludedPrefixesLogic);
         if (activeOrgFilter) params.set('organization_name', activeOrgFilter);
-        if (activeProjectFilter) params.set('project_name', activeProjectFilter);
+        if (activeProjectFilter) params.set('project_id', activeProjectFilter);
         for (const [key, value] of Object.entries(extra)) {
             if (value !== null && value !== undefined && value !== '') params.set(key, value);
         }
@@ -398,7 +407,7 @@
         const query = dashboardQuery({ limit: 200 });
         const scoped = {
             organization_name: activeOrgFilter || undefined,
-            project_name: activeProjectFilter || undefined,
+            project_id: activeProjectFilter || undefined,
         };
         const [personas, sessions, scopeRows] = await Promise.all([
             fetchJSON(`/api/v1/personas?${query}`),
@@ -406,12 +415,14 @@
             fetchJSON(`/api/v1/logs/activity?${dashboardQuery({ limit: 500, ...scoped })}`),
         ]);
 
+        populateOrgProjectFilters(scopeRows || []);
+
         const personaScopeByDistinct = new Map();
         for (const r of (scopeRows || [])) {
             if (!r?.distinct_id || personaScopeByDistinct.has(r.distinct_id)) continue;
             personaScopeByDistinct.set(r.distinct_id, {
                 org: rowOrgName(r) || '—',
-                project: rowProjectName(r) || '—',
+                project: rowProjectLabel(r) || '—',
             });
         }
 
@@ -562,7 +573,12 @@
 
     function stripExecutableReplayNodes(node) {
         if (!node || typeof node !== 'object') return node;
-        if (String(node.tagName || '').toLowerCase() === 'script') return null;
+        const tag = String(node.tagName || '').toLowerCase();
+        if (tag === 'script') return null;
+        if (tag === 'link') {
+            const rel = String((node.attributes && node.attributes.rel) || '').toLowerCase();
+            if (rel === 'preload' || rel === 'modulepreload') return null;
+        }
         if (Array.isArray(node.childNodes)) {
             node.childNodes = node.childNodes
                 .map(stripExecutableReplayNodes)
@@ -651,28 +667,16 @@
 
     // ── Lazy thumbnail loader ─────────────────────────────────────────────────
     function initThumbObserver() {
-        const obs = new IntersectionObserver(async (entries) => {
-            for (const { isIntersecting, target: el } of entries) {
-                if (!isIntersecting || el.dataset.loaded) continue;
-                el.dataset.loaded = '1';
-                obs.unobserve(el);
-                const events = await ensureSessionEvents(el.dataset.session);
-                if (!events) return;
-                el.innerHTML = '';
-                const player = new rrwebPlayer({
-                    target: el,
-                    props: { events, width: 1080, height: 680, autoPlay: false, showController: false }
-                });
-                // Seek thumbnail to the moment of this specific event
-                if (el.dataset.ts && events.length) {
-                    const offset = Math.max(0, parseInt(el.dataset.ts, 10) - events[0].timestamp);
-                    if (offset > 0) {
-                        setTimeout(() => { try { player.goto(offset); } catch(e) {} }, 150);
-                    }
-                }
-            }
-        }, { rootMargin: '300px' });
-        document.querySelectorAll('.act-thumb-wrap[data-session]').forEach(el => obs.observe(el));
+        // Do not instantiate rrweb players for feed thumbnails. Each rrweb player
+        // creates a sandboxed iframe; replaying many thumbnails can flood the
+        // browser console with sandbox/script warnings from recorded pages. Keep
+        // the feed as lightweight placeholders and only create one sanitized
+        // replay iframe when the user explicitly opens the modal.
+        document.querySelectorAll('.act-thumb-wrap[data-session]').forEach(el => {
+            if (el.dataset.loaded) return;
+            el.dataset.loaded = '1';
+            el.innerHTML = '<div class="act-thumb-placeholder">&#x25B6;<br><span>Replay</span></div>';
+        });
     }
 
     // ── Thumbnail rendering ────────────────────────────────────────────────────
@@ -731,7 +735,10 @@
             </div>`;
         }
         const icon = { identify: '&#x1F464;', alias: '&#x1F517;', record_session: '&#x25B6;' }[r.action] || '&#x22EF;';
-        return `<div class="act-thumb-placeholder">${icon}</div>`;
+        return `<div class="act-url-preview" title="${r.action}">
+            <div class="url-domain" style="font-size:9px;opacity:0.5">event</div>
+            <div class="url-path" style="font-size:18px;line-height:1">${icon}</div>
+        </div>`;
     }
 
     function renderActivityTable(rows, containerId, failedOnly) {
@@ -763,7 +770,7 @@
                         <span class="act-who">${r.distinct_id}</span>
                         <span class="act-time" title="${exact}">${ago}</span>
                         ${rowOrgName(r) ? `<span class="act-page" title="Organization">${rowOrgName(r)}</span>` : ''}
-                        ${rowProjectName(r) ? `<span class="act-page" title="Project">${rowProjectName(r)}</span>` : ''}
+                        ${rowProjectLabel(r) ? `<span class="act-page" title="Project">${rowProjectLabel(r)}</span>` : ''}
                         ${page !== '--' ? `<span class="act-page" title="${pageUrl}">${page}</span>` : ''}
                         ${sessionId ? `<span class="act-session-badge" title="Session ${sessionId}">${sessionId.slice(0, 8)}</span>` : ''}
                     </div>
@@ -808,15 +815,35 @@
     let activePersonaFilter = null;
     let activeOrgFilter = null;
     let activeProjectFilter = null;
+    const projectLabelById = new Map();
 
     function rowOrgName(r) {
         const meta = r && r.metadata ? r.metadata : {};
         return (meta.organization_name || meta.org_name || meta.organization || '').trim();
     }
 
+    function rowProjectId(r) {
+        const meta = r && r.metadata ? r.metadata : {};
+        return (meta.project_id || '').trim();
+    }
+
     function rowProjectName(r) {
         const meta = r && r.metadata ? r.metadata : {};
         return (meta.project_name || meta.project || '').trim();
+    }
+
+    function projectNameScore(name) {
+        const n = String(name || '').trim().toLowerCase();
+        if (!n) return 0;
+        // Generic placeholder names are useful only when no better name exists.
+        if (['test', 'demo', 'default', 'unknown', 'project'].includes(n)) return 1;
+        return 10 + Math.min(n.length, 80);
+    }
+
+    function rowProjectLabel(r) {
+        const id = rowProjectId(r);
+        if (id && projectLabelById.has(id)) return projectLabelById.get(id);
+        return rowProjectName(r);
     }
 
     function populateUserFilter(personas) {
@@ -857,7 +884,21 @@
         const prevProject = projectSel.value;
 
         const orgs = Array.from(new Set((rows || []).map(rowOrgName).filter(Boolean))).sort((a, b) => a.localeCompare(b));
-        const projects = Array.from(new Set((rows || []).map(rowProjectName).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+        const projectsById = new Map();
+        for (const row of (rows || [])) {
+            const id = rowProjectId(row);
+            const name = rowProjectName(row);
+            if (!id && !name) continue;
+            const key = id || `name:${name}`;
+            const prev = projectsById.get(key);
+            const candidate = { id: key, label: name || id, score: projectNameScore(name) };
+            if (!prev || candidate.score > prev.score) projectsById.set(key, candidate);
+        }
+        projectLabelById.clear();
+        for (const project of projectsById.values()) {
+            if (!String(project.id).startsWith('name:')) projectLabelById.set(project.id, project.label);
+        }
+        const projects = Array.from(projectsById.values()).sort((a, b) => a.label.localeCompare(b.label));
 
         orgSel.innerHTML = '<option value="">All organizations</option>';
         for (const org of orgs) {
@@ -870,13 +911,13 @@
         projectSel.innerHTML = '<option value="">All projects</option>';
         for (const project of projects) {
             const opt = document.createElement('option');
-            opt.value = project;
-            opt.textContent = project;
+            opt.value = project.id;
+            opt.textContent = project.label;
             projectSel.appendChild(opt);
         }
 
         if (prevOrg && orgs.includes(prevOrg)) orgSel.value = prevOrg;
-        if (prevProject && projects.includes(prevProject)) projectSel.value = prevProject;
+        if (prevProject && projects.some(project => project.id === prevProject)) projectSel.value = prevProject;
     }
 
     function filterByPersona(distinctId) {
@@ -886,24 +927,49 @@
         switchTab('logs');
     }
 
+    let activeTimeHours = 24;
+
+    function onTimeRangeChange(val) {
+        activeTimeHours = parseInt(val, 10);
+        loadLogs();
+    }
+
+    function timeLabel() {
+        if (activeTimeHours === 0) return 'All time';
+        if (activeTimeHours === 24) return '24h';
+        if (activeTimeHours === 168) return '7d';
+        if (activeTimeHours === 720) return '30d';
+        return `${activeTimeHours}h`;
+    }
+
     async function loadLogs() {
         const did = activePersonaFilter || undefined;
+        const hoursParam = activeTimeHours > 0 ? activeTimeHours : undefined;
 
         const scoped = {
             distinct_id: did,
             organization_name: activeOrgFilter || undefined,
-            project_name: activeProjectFilter || undefined,
+            project_id: activeProjectFilter || undefined,
+            hours: hoursParam,
         };
+
+        const activityLimit = activeTimeHours === 0 ? 500 : 100;
 
         const [stats, allActivity, activity, failed_actions, failed] = await Promise.all([
             fetchJSON(`/api/v1/logs/stats?${dashboardQuery(scoped)}`),
-            fetchJSON(`/api/v1/logs/activity?${dashboardQuery({ limit: 300, distinct_id: did })}`),
-            fetchJSON(`/api/v1/logs/activity?${dashboardQuery({ limit: 100, ...scoped })}`),
+            fetchJSON(`/api/v1/logs/activity?${dashboardQuery({ limit: 300, distinct_id: did, hours: hoursParam })}`),
+            fetchJSON(`/api/v1/logs/activity?${dashboardQuery({ limit: activityLimit, ...scoped })}`),
             fetchJSON(`/api/v1/logs/activity?${dashboardQuery({ limit: 50, saved: false, ...scoped })}`),
             fetchJSON('/api/v1/logs/failed-events?limit=50'),
         ]);
 
         populateOrgProjectFilters(allActivity || []);
+
+        const lbl = timeLabel();
+        ['ls-lbl-total', 'ls-lbl-saved', 'ls-lbl-failed', 'ls-lbl-batch'].forEach((id, i) => {
+            const labels = [`Actions (${lbl})`, `Saved (${lbl})`, `Failed (${lbl})`, `Batch failures (${lbl})`];
+            document.getElementById(id).textContent = labels[i];
+        });
 
         if (stats) {
             document.getElementById('ls-total').textContent = stats.total_24h.toLocaleString();

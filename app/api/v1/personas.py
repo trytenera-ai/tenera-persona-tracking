@@ -75,7 +75,11 @@ def _event_property_clause(key: str, value: str):
     )
 
 
-def _persona_scope_exists(organization_name: Optional[str], project_name: Optional[str]):
+def _persona_scope_exists(
+    organization_name: Optional[str],
+    project_name: Optional[str],
+    project_id: Optional[str] = None,
+):
     clauses = [Event.persona_id == Persona.id]
     if organization_name:
         clauses.append(
@@ -84,7 +88,9 @@ def _persona_scope_exists(organization_name: Optional[str], project_name: Option
                 _event_property_clause("org_name", organization_name),
             )
         )
-    if project_name:
+    if project_id:
+        clauses.append(_event_property_clause("project_id", project_id))
+    elif project_name:
         clauses.append(
             or_(
                 _event_property_clause("project_name", project_name),
@@ -142,6 +148,7 @@ async def list_personas(
     exclude_prefixes_logic: str = Query(default="or", pattern="^(or|and)$"),
     organization_name: Optional[str] = Query(default=None),
     project_name: Optional[str] = Query(default=None),
+    project_id: Optional[str] = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     """List personas with optional search, environment, and anonymous filters."""
@@ -157,8 +164,8 @@ async def list_personas(
         query = query.where(prefix_clause)
     if env:
         query = query.where(_persona_env_exists(env))
-    if organization_name or project_name:
-        query = query.where(_persona_scope_exists(organization_name, project_name))
+    if organization_name or project_name or project_id:
+        query = query.where(_persona_scope_exists(organization_name, project_name, project_id))
 
     query = query.order_by(Persona.created_at.desc()).offset(offset).limit(limit)
 

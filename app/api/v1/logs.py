@@ -69,6 +69,10 @@ def _event_project_clause(project_name: str):
     )
 
 
+def _event_project_id_clause(project_id: str):
+    return _event_property_clause("project_id", project_id)
+
+
 @router.get("/stats")
 async def get_stats(
     distinct_id: Optional[str] = Query(None),
@@ -80,15 +84,17 @@ async def get_stats(
     exclude_prefixes_logic: str = Query(default="or", pattern="^(or|and)$"),
     organization_name: Optional[str] = Query(default=None),
     project_name: Optional[str] = Query(default=None),
+    project_id: Optional[str] = Query(default=None),
+    hours: Optional[int] = Query(default=24, ge=1, description="Time window in hours; 0 = all time"),
     _: str = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ):
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours) if hours else None
 
-    q = (
-        select(func.count(Event.id))
-        .where(Event.timestamp >= cutoff)
-    )
+    q = select(func.count(Event.id))
+    if cutoff is not None:
+        q = q.where(Event.timestamp >= cutoff)
+
     prefix_clause = _exclude_prefixes_clause(exclude_prefixes, exclude_prefixes_logic)
     if distinct_id or hide_anonymous or prefix_clause is not None:
         q = q.join(Persona)
@@ -102,17 +108,21 @@ async def get_stats(
         q = q.where(_event_env_clause(env))
     if organization_name:
         q = q.where(_event_org_clause(organization_name))
-    if project_name:
+    if project_id:
+        q = q.where(_event_project_id_clause(project_id))
+    elif project_name:
         q = q.where(_event_project_clause(project_name))
 
     total = (await db.execute(q)).scalar_one()
 
+    label = f"{hours}h" if hours else "all"
     return {
         "total_24h": total,
         "saved_24h": total,
         "failed_24h": 0,
         "success_rate_24h": 1.0 if total > 0 else 0.0,
         "failed_events_24h": 0,
+        "label": label,
     }
 
 
@@ -129,6 +139,8 @@ async def get_activity(
     exclude_prefixes_logic: str = Query(default="or", pattern="^(or|and)$"),
     organization_name: Optional[str] = Query(default=None),
     project_name: Optional[str] = Query(default=None),
+    project_id: Optional[str] = Query(default=None),
+    hours: Optional[int] = Query(default=None, ge=1, description="Time window in hours; omit for all time"),
     _: str = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ):
@@ -142,6 +154,11 @@ async def get_activity(
         .order_by(Event.timestamp.desc())
         .limit(limit)
     )
+
+    if hours:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        q = q.where(Event.timestamp >= cutoff)
+
     prefix_clause = _exclude_prefixes_clause(exclude_prefixes, exclude_prefixes_logic)
     if distinct_id or hide_anonymous or prefix_clause is not None:
         q = q.join(Persona)
@@ -155,7 +172,9 @@ async def get_activity(
         q = q.where(_event_env_clause(env))
     if organization_name:
         q = q.where(_event_org_clause(organization_name))
-    if project_name:
+    if project_id:
+        q = q.where(_event_project_id_clause(project_id))
+    elif project_name:
         q = q.where(_event_project_clause(project_name))
 
     rows = (await db.execute(q)).scalars().all()

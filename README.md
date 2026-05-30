@@ -154,7 +154,8 @@ Optional screenshots can be passed as a base64 string in `screenshot`. When Supa
 
 ## Session replay ingestion
 
-Create a session, then append rrweb event batches:
+Create or reuse the current active session, then append rrweb event batches. TPT mirrors PostHog-style session semantics: the same `distinct_id` reuses its latest active session until there has been no activity for 30 minutes (`SESSION_IDLE_TIMEOUT_SECONDS`, clamped between 60 seconds and 10 hours) or the session is older than 24 hours. Reusing a session returns the same `id` with `reused: true`; a new session returns `reused: false`.
+
 
 ```js
 const session = await fetch(`${TPT_BASE_URL}/api/v1/sessions`, {

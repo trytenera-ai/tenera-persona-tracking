@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -26,6 +25,10 @@ class Settings(BaseSettings):
     tpt_access_code: Optional[str] = None
     # Write-only key — safe to embed in browser JS (only grants access to /track)
     write_key: Optional[str] = None
+
+    # Session semantics mirror PostHog: reuse the current session while active.
+    # A new session starts after this many seconds of inactivity (default 30 minutes).
+    session_idle_timeout_seconds: int = 30 * 60
 
     # LLM for cluster NER + summarization (via litellm)
     anthropic_api_key: Optional[str] = None
