@@ -52,6 +52,10 @@
         .act-time { font-size: 11px; color: var(--text-3); }
         .act-page { font-size: 11px; color: var(--text-2); font-family: 'Geist Mono', monospace; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--bg-elevated); padding: 1px 6px; border-radius: 4px; }
         .act-detail { font-size: 11px; color: var(--text-2); }
+        .session-timeline { margin-top: 7px; display: flex; flex-direction: column; gap: 4px; }
+        .session-event { font-size: 11px; color: var(--text-2); line-height: 1.35; }
+        .session-event-time { color: var(--text-3); font-family: 'Geist Mono', monospace; margin-right: 6px; }
+        .session-event-more { font-size: 11px; color: var(--text-3); margin-top: 2px; }
         .act-status-ok  { font-size: 13px; color: var(--green); flex-shrink: 0; }
         .act-status-err { font-size: 13px; color: var(--red); flex-shrink: 0; }
 
@@ -271,7 +275,7 @@
 
         <!-- All recent activity -->
         <div class="card" style="margin-bottom: 16px;">
-            <h2>Recent activity <span style="font-size:12px;color:var(--text-3);font-weight:400">(last 100)</span></h2>
+            <h2>Recent sessions <span style="font-size:12px;color:var(--text-3);font-weight:400">(grouped from latest actions)</span></h2>
             <div id="activity-container"><div class="log-empty">Loading...</div></div>
         </div>
 
@@ -741,6 +745,120 @@
         </div>`;
     }
 
+    function renderActivityRow(r) {
+        const label     = friendlyAction(r.action, r.metadata);
+        const detail    = fmtDetail(r.action, r.metadata);
+        const page      = fmtPage(r.metadata);
+        const pageUrl   = r.metadata && r.metadata.url || '';
+        const sessionId = r.metadata && r.metadata.session_id;
+        const ago       = timeAgo(r.created_at);
+        const exact     = fmtTime(r.created_at);
+        const statusIcon = r.saved
+            ? `<span class="act-status-ok"  title="Saved">&#10003;</span>`
+            : `<span class="act-status-err" title="${r.error || 'Failed'}">&#10007;</span>`;
+        const viewSessionBtn = sessionId
+            ? `<a class="view-session-btn" href="/replay/${sessionId}" target="_blank">View Session</a>`
+            : '';
+        return `<div class="act-card">
+            <div style="width:108px;flex-shrink:0">${renderThumb(r)}</div>
+            <div class="act-body">
+                <div class="act-action" title="${r.action}">${label}</div>
+                <div class="act-meta">
+                    <span class="act-who">${r.distinct_id}</span>
+                    <span class="act-time" title="${exact}">${ago}</span>
+                    ${rowOrgName(r) ? `<span class="act-page" title="Organization">${rowOrgName(r)}</span>` : ''}
+                    ${rowProjectLabel(r) ? `<span class="act-page" title="Project">${rowProjectLabel(r)}</span>` : ''}
+                    ${page !== '--' ? `<span class="act-page" title="${pageUrl}">${page}</span>` : ''}
+                    ${sessionId ? `<span class="act-session-badge" title="Session ${sessionId}">${sessionId.slice(0, 8)}</span>` : ''}
+                </div>
+                ${detail ? `<div class="act-detail" style="margin-top:3px">${detail}</div>` : ''}
+                ${!r.saved && r.error ? `<div class="act-detail sc-5xx" style="margin-top:2px">${r.error}</div>` : ''}
+            </div>
+            <div class="act-actions">
+                ${viewSessionBtn}
+                ${statusIcon}
+            </div>
+        </div>`;
+    }
+
+    function groupRowsBySession(rows) {
+        const groups = [];
+        const bySession = new Map();
+        for (const r of rows || []) {
+            const sessionId = r.metadata && r.metadata.session_id;
+            if (!sessionId) {
+                groups.push({ sessionId: null, latest: r, rows: [r], latestAt: new Date(r.created_at).getTime() });
+                continue;
+            }
+            let group = bySession.get(sessionId);
+            if (!group) {
+                group = { sessionId, latest: r, rows: [], latestAt: new Date(r.created_at).getTime() };
+                bySession.set(sessionId, group);
+                groups.push(group);
+            }
+            group.rows.push(r);
+            const ts = new Date(r.created_at).getTime();
+            if (ts > group.latestAt) {
+                group.latestAt = ts;
+                group.latest = r;
+            }
+        }
+        return groups.sort((a, b) => b.latestAt - a.latestAt);
+    }
+
+    function renderSessionTimeline(rows) {
+        const ordered = [...rows].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        const shown = ordered.slice(-8);
+        let html = '<div class="session-timeline">';
+        for (const r of shown) {
+            const label = friendlyAction(r.action, r.metadata);
+            const detail = fmtDetail(r.action, r.metadata);
+            const page = fmtPage(r.metadata);
+            html += `<div class="session-event">
+                <span class="session-event-time" title="${fmtTime(r.created_at)}">${fmtTime(r.created_at)}</span>
+                <strong>${label}</strong>${page !== '--' ? ` <span class="act-page" title="${(r.metadata && r.metadata.url) || ''}">${page}</span>` : ''}
+                ${detail ? `<span> ${detail}</span>` : ''}
+            </div>`;
+        }
+        if (ordered.length > shown.length) {
+            html += `<div class="session-event-more">+ ${ordered.length - shown.length} earlier action${ordered.length - shown.length === 1 ? '' : 's'} in this session</div>`;
+        }
+        html += '</div>';
+        return html;
+    }
+
+    function renderSessionGroup(group) {
+        if (!group.sessionId) return renderActivityRow(group.latest);
+        const r = group.latest;
+        const page = fmtPage(r.metadata);
+        const pageUrl = r.metadata && r.metadata.url || '';
+        const ago = timeAgo(r.created_at);
+        const exact = fmtTime(r.created_at);
+        const thumbRow = group.rows.find(row => row.screenshot_url) || r;
+        const statusIcon = group.rows.every(row => row.saved)
+            ? `<span class="act-status-ok" title="Saved">&#10003;</span>`
+            : `<span class="act-status-err" title="One or more actions failed">&#10007;</span>`;
+        return `<div class="act-card">
+            <div style="width:108px;flex-shrink:0">${renderThumb(thumbRow)}</div>
+            <div class="act-body">
+                <div class="act-action" title="Session ${group.sessionId}">Session · ${group.rows.length} action${group.rows.length === 1 ? '' : 's'}</div>
+                <div class="act-meta">
+                    <span class="act-who">${r.distinct_id}</span>
+                    <span class="act-time" title="Latest activity: ${exact}">${ago}</span>
+                    ${rowOrgName(r) ? `<span class="act-page" title="Organization">${rowOrgName(r)}</span>` : ''}
+                    ${rowProjectLabel(r) ? `<span class="act-page" title="Project">${rowProjectLabel(r)}</span>` : ''}
+                    ${page !== '--' ? `<span class="act-page" title="${pageUrl}">${page}</span>` : ''}
+                    <span class="act-session-badge" title="Session ${group.sessionId}">${group.sessionId.slice(0, 8)}</span>
+                </div>
+                ${renderSessionTimeline(group.rows)}
+            </div>
+            <div class="act-actions">
+                <a class="view-session-btn" href="/replay/${group.sessionId}" target="_blank">View Session</a>
+                ${statusIcon}
+            </div>
+        </div>`;
+    }
+
     function renderActivityTable(rows, containerId, failedOnly) {
         const el = document.getElementById(containerId);
         if (!rows || !rows.length) {
@@ -748,40 +866,10 @@
             return;
         }
         let html = '<div class="act-feed">';
-        for (const r of rows) {
-            const label     = friendlyAction(r.action, r.metadata);
-            const detail    = fmtDetail(r.action, r.metadata);
-            const page      = fmtPage(r.metadata);
-            const pageUrl   = r.metadata && r.metadata.url || '';
-            const sessionId = r.metadata && r.metadata.session_id;
-            const ago       = timeAgo(r.created_at);
-            const exact     = fmtTime(r.created_at);
-            const statusIcon = r.saved
-                ? `<span class="act-status-ok"  title="Saved">&#10003;</span>`
-                : `<span class="act-status-err" title="${r.error || 'Failed'}">&#10007;</span>`;
-            const viewSessionBtn = sessionId
-                ? `<a class="view-session-btn" href="/replay/${sessionId}" target="_blank">View Session</a>`
-                : '';
-            html += `<div class="act-card">
-                <div style="width:108px;flex-shrink:0">${renderThumb(r)}</div>
-                <div class="act-body">
-                    <div class="act-action" title="${r.action}">${label}</div>
-                    <div class="act-meta">
-                        <span class="act-who">${r.distinct_id}</span>
-                        <span class="act-time" title="${exact}">${ago}</span>
-                        ${rowOrgName(r) ? `<span class="act-page" title="Organization">${rowOrgName(r)}</span>` : ''}
-                        ${rowProjectLabel(r) ? `<span class="act-page" title="Project">${rowProjectLabel(r)}</span>` : ''}
-                        ${page !== '--' ? `<span class="act-page" title="${pageUrl}">${page}</span>` : ''}
-                        ${sessionId ? `<span class="act-session-badge" title="Session ${sessionId}">${sessionId.slice(0, 8)}</span>` : ''}
-                    </div>
-                    ${detail ? `<div class="act-detail" style="margin-top:3px">${detail}</div>` : ''}
-                    ${!r.saved && r.error ? `<div class="act-detail sc-5xx" style="margin-top:2px">${r.error}</div>` : ''}
-                </div>
-                <div class="act-actions">
-                    ${viewSessionBtn}
-                    ${statusIcon}
-                </div>
-            </div>`;
+        if (failedOnly) {
+            for (const r of rows) html += renderActivityRow(r);
+        } else {
+            for (const group of groupRowsBySession(rows)) html += renderSessionGroup(group);
         }
         html += '</div>';
         el.innerHTML = html;

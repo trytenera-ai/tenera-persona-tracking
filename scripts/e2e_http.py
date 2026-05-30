@@ -205,6 +205,7 @@ def main() -> int:
         checks.ok("dashboard has default anonymous toggle", "hide-anonymous-toggle" in dashboard and "checked" in dashboard, "missing checked anonymous toggle")
         checks.ok("dashboard has browser-stored prefix filter", "tpt_dashboard_prefix_filters" in dashboard and "prefix-input" in dashboard, "missing persisted prefix filter UI")
         checks.ok("dashboard displays session count", "session-count" in dashboard and "/api/v1/sessions" in dashboard, "missing sessions summary integration")
+        checks.ok("dashboard groups recent activity by session", "Recent sessions" in dashboard and "groupRowsBySession" in dashboard, "missing session-grouped activity feed")
 
         # Auth boundary checks.
         client.request("GET", "/api/v1/personas", api_key="wrong-tpt-e2e-key", expected=(401,))
