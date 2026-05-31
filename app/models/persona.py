@@ -25,6 +25,7 @@ class Persona(Base, TimestampMixin):
     distinct_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    avatar_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     entities: Mapped[List["Entity"]] = relationship(
         "Entity", back_populates="persona", cascade="all, delete-orphan", lazy="selectin"
