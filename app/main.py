@@ -3,11 +3,10 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlencode
 
-from fastapi import FastAPI
-from fastapi import Request
-from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -98,12 +97,15 @@ def _access_challenge() -> HTMLResponse:
                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
                    background: #f6f1e8; color: #241f1a; }
             main { width: min(92vw, 380px); padding: 28px; border: 1px solid #d8cdbd;
-                   border-radius: 18px; background: #fffaf1; box-shadow: 0 16px 40px rgba(36,31,26,.08); }
+                   border-radius: 18px; background: #fffaf1;
+                   box-shadow: 0 16px 40px rgba(36,31,26,.08); }
             h1 { margin: 0 0 8px; font-size: 22px; }
             p { margin: 0 0 20px; color: #6c6258; font-size: 14px; }
-            input, button { width: 100%; box-sizing: border-box; border-radius: 10px; font-size: 15px; }
+            input, button { width: 100%; box-sizing: border-box;
+                            border-radius: 10px; font-size: 15px; }
             input { padding: 12px 14px; border: 1px solid #cfc3b1; background: #fff; }
-            button { margin-top: 12px; padding: 12px 14px; border: 0; background: #241f1a; color: #fff; font-weight: 650; cursor: pointer; }
+            button { margin-top: 12px; padding: 12px 14px; border: 0;
+                     background: #241f1a; color: #fff; font-weight: 650; cursor: pointer; }
           </style>
         </head>
         <body>
@@ -141,11 +143,22 @@ def _require_dashboard_access(request: Request) -> Optional[Response]:
     return _access_challenge()
 
 
+@app.get("/tpt.js", include_in_schema=False)
+async def serve_tpt_snippet():
+    return FileResponse(
+        _APP_DIR / "static" / "tpt.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=300, stale-while-revalidate=3600"},
+    )
+
+
 @app.get("/docs", include_in_schema=False)
 async def docs(request: Request):
     if response := _require_dashboard_access(request):
         return response
-    return get_swagger_ui_html(openapi_url="/openapi.json", title="Tenera Persona Tracking - Swagger UI")
+    return get_swagger_ui_html(
+        openapi_url="/openapi.json", title="Tenera Persona Tracking - Swagger UI"
+    )
 
 
 @app.get("/redoc", include_in_schema=False)
