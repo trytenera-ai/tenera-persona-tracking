@@ -37,6 +37,10 @@ async def init_db():
                 "ALTER TABLE events ADD COLUMN IF NOT EXISTS screenshot_url TEXT",
                 "ALTER TABLE events ADD COLUMN screenshot_url TEXT",
             ),
+            (
+                "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS thumbnail_url TEXT",
+                "ALTER TABLE sessions ADD COLUMN thumbnail_url TEXT",
+            ),
         ]:
             try:
                 await conn.exec_driver_sql(stmt_pg)

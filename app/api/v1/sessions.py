@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -109,6 +109,7 @@ async def list_sessions(
                 "id": s.id,
                 "persona_id": s.persona_id,
                 "url": s.url,
+                "thumbnail_url": s.thumbnail_url,
                 "created_at": s.created_at.isoformat(),
                 "updated_at": s.updated_at.isoformat() if s.updated_at else None,
             }
@@ -189,6 +190,42 @@ async def append_session_events(
     db.add(batch)
     session.updated_at = _now_utc()
     await db.commit()
+
+
+class SessionThumbnailUpdate(BaseModel):
+    thumbnail_url: str = Field(..., min_length=1, max_length=800_000)
+
+
+@router.get("/{session_id}/thumbnail")
+async def get_session_thumbnail(
+    session_id: str,
+    _: str = Depends(verify_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the persisted dashboard thumbnail for a session, when available."""
+    session = await db.get(Session, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"thumbnail_url": session.thumbnail_url}
+
+
+@router.put("/{session_id}/thumbnail", status_code=204)
+async def update_session_thumbnail(
+    session_id: str,
+    body: SessionThumbnailUpdate,
+    _: str = Depends(verify_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """Persist a small dashboard thumbnail generated from the replay preview."""
+    session = await db.get(Session, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not body.thumbnail_url.startswith("data:image/"):
+        raise HTTPException(status_code=400, detail="thumbnail_url must be a data:image URL")
+    session.thumbnail_url = body.thumbnail_url
+    session.updated_at = _now_utc()
+    await db.commit()
+
 
 
 @router.get("/{session_id}/events")
