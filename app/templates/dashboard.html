@@ -169,6 +169,13 @@
             border: 1px solid rgba(0,0,0,0.08); cursor: zoom-in; display: block;
             transition: opacity 0.15s; }
         .sc-thumb:hover { opacity: 0.85; }
+
+        .persona-avatar-cell { display:flex; align-items:center; gap:8px; min-width:140px; }
+        .persona-avatar { width:32px; height:32px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; overflow:hidden; font-size:12px; font-weight:700; color:#fff; background:linear-gradient(135deg,#5f5a92,#4aa99a); border:1px solid var(--border-md); }
+        .persona-avatar img { width:100%; height:100%; object-fit:cover; display:block; }
+        .avatar-actions { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+        .avatar-action { font-size:10px; color:var(--text-2); border:1px solid var(--border-md); border-radius:5px; padding:2px 6px; cursor:pointer; background:var(--bg-elevated); font-family:inherit; }
+        .avatar-action:hover { color:var(--text-1); border-color:var(--text-2); }
     </style>
 </head>
 <body>
@@ -299,6 +306,7 @@
     let hideAnonymous = true;
     let excludedPrefixes = [];
     let excludedPrefixesLogic = 'or';
+    let personaByDistinct = new Map();
 
     function initPrefixFilters() {
         let parsed = {};
@@ -377,6 +385,47 @@
         return did.startsWith('anon_') || did.startsWith('anonymous');
     }
 
+    function isEmailLike(value) {
+        const raw = String(value || '').trim();
+        return raw.includes('@') && raw.split('@').pop().includes('.');
+    }
+
+    function isUuidLike(value) {
+        return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || '').trim());
+    }
+
+    function entityValue(p, keys) {
+        const wanted = new Set(keys.map(k => k.toLowerCase()));
+        for (const entity of (p && p.entities) || []) {
+            const key = String(entity.key || '').toLowerCase();
+            const value = String(entity.value || '').trim();
+            if (wanted.has(key) && value) return value;
+        }
+        return '';
+    }
+
+    function personaDisplayId(p) {
+        if (!p) return '';
+        const entityEmail = entityValue(p, ['email', 'user_email', 'userEmail', 'auth_email', 'primary_email']);
+        if (isEmailLike(entityEmail)) return entityEmail;
+        if (isEmailLike(p.distinct_id)) return p.distinct_id;
+        if (isEmailLike(p.name)) return p.name;
+        if (p.name) return p.name;
+        if (isUuidLike(p.distinct_id)) return 'Unknown user';
+        return p.distinct_id || '';
+    }
+
+    function rowDisplayId(r) {
+        if (!r) return '';
+        if (r.display_id) return r.display_id;
+        const meta = r.metadata || {};
+        for (const key of ['email', 'user_email', 'userEmail', 'auth_email', 'primary_email', 'preferred_email']) {
+            if (isEmailLike(meta[key])) return meta[key];
+        }
+        const persona = personaByDistinct.get(r.distinct_id);
+        return personaDisplayId(persona) || r.distinct_id || '';
+    }
+
     function dashboardQuery(extra = {}) {
         const params = new URLSearchParams({ env: activeEnv });
         if (hideAnonymous) params.set('hide_anonymous', 'true');
@@ -405,6 +454,59 @@
         return resp.json();
     }
 
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function initialsForPersona(p) {
+        const label = String(p.name || p.distinct_id || '?').trim();
+        const initials = label.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+        return initials || '?';
+    }
+
+    function avatarMarkup(p) {
+        const initials = escapeHtml(initialsForPersona(p));
+        if (p.avatar_url) {
+            return `<div class="persona-avatar" title="Avatar for ${escapeHtml(p.name || p.distinct_id)}"><img src="${escapeHtml(p.avatar_url)}" alt="" onerror="this.parentElement.textContent='${initials}'"></div>`;
+        }
+        return `<div class="persona-avatar" title="No avatar set">${initials}</div>`;
+    }
+
+    async function setPersonaAvatar(personaId, input) {
+        const file = input.files && input.files[0];
+        input.value = '';
+        if (!file) return;
+        if (!file.type.startsWith('image/')) { alert('Please choose an image file.'); return; }
+        if (file.size > 2 * 1024 * 1024) { alert('Avatar image must be 2MB or smaller.'); return; }
+        const reader = new FileReader();
+        reader.onload = async () => {
+            const res = await fetch(`/api/v1/personas/${personaId}`, {
+                method: 'PATCH',
+                headers,
+                body: JSON.stringify({ avatar_data: reader.result }),
+            });
+            if (!res.ok) { alert('Failed to save avatar.'); return; }
+            await loadPersonas();
+        };
+        reader.readAsDataURL(file);
+    }
+
+    async function clearPersonaAvatar(personaId) {
+        const res = await fetch(`/api/v1/personas/${personaId}`, {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify({ avatar_url: null }),
+        });
+        if (!res.ok) { alert('Failed to clear avatar.'); return; }
+        await loadPersonas();
+    }
+
     // ── Personas ───────────────────────────────────────────────────────────────
 
     async function loadPersonas() {
@@ -420,6 +522,13 @@
         ]);
 
         populateOrgProjectFilters(scopeRows || []);
+
+        personaByDistinct = new Map();
+        if (personas && personas.results) {
+            for (const p of personas.results) {
+                if (p && p.distinct_id) personaByDistinct.set(p.distinct_id, p);
+            }
+        }
 
         const personaScopeByDistinct = new Map();
         for (const r of (scopeRows || [])) {
@@ -445,19 +554,29 @@
     function renderPersonas(personas, personaScopeByDistinct) {
         const el = document.getElementById('personas-container');
         if (!personas.length) { el.innerHTML = '<div class="empty">No personas yet</div>'; return; }
-        let html = '<table><thead><tr><th>Distinct ID</th><th>Name</th><th>Organization</th><th>Project</th><th>Entities</th><th>Created</th><th></th></tr></thead><tbody>';
+        let html = '<table><thead><tr><th>Avatar</th><th>Distinct ID</th><th>Name</th><th>Organization</th><th>Project</th><th>Entities</th><th>Created</th><th></th></tr></thead><tbody>';
         for (const p of personas) {
-            const entities = (p.entities || []).map(e => `<span class="badge badge-blue">${e.key}=${e.value}</span>`).join(' ');
-            const did = p.distinct_id.replace(/'/g, "\\'");
+            const entities = (p.entities || []).map(e => `<span class="badge badge-blue">${escapeHtml(e.key)}=${escapeHtml(e.value)}</span>`).join(' ');
+            const did = String(p.distinct_id || '').replace(/'/g, "\\'");
+            const personaId = String(p.id || '').replace(/'/g, "\\'");
             const exact = fmtTime(p.created_at);
             const scope = personaScopeByDistinct?.get(p.distinct_id) || { org: '—', project: '—' };
             html += `<tr>
-                <td><strong>${p.distinct_id}</strong></td>
-                <td>${p.name || '--'}</td>
-                <td>${scope.org}</td>
-                <td>${scope.project}</td>
+                <td>
+                    <div class="persona-avatar-cell">
+                        ${avatarMarkup(p)}
+                        <div class="avatar-actions">
+                            <label class="avatar-action">Set<input type="file" accept="image/*" style="display:none" onchange="setPersonaAvatar('${personaId}', this)"></label>
+                            ${p.avatar_url ? `<button class="avatar-action" onclick="clearPersonaAvatar('${personaId}')">Clear</button>` : ''}
+                        </div>
+                    </div>
+                </td>
+                <td><strong>${escapeHtml(p.distinct_id)}</strong></td>
+                <td>${escapeHtml(p.name || '--')}</td>
+                <td>${escapeHtml(scope.org)}</td>
+                <td>${escapeHtml(scope.project)}</td>
                 <td>${entities}</td>
-                <td title="${exact}">${timeAgo(p.created_at)}</td>
+                <td title="${escapeHtml(exact)}">${timeAgo(p.created_at)}</td>
                 <td><button class="refresh-btn" onclick="filterByPersona('${did}')" title="View action log">&#x1F50D;</button></td>
             </tr>`;
         }
@@ -764,7 +883,7 @@
             <div class="act-body">
                 <div class="act-action" title="${r.action}">${label}</div>
                 <div class="act-meta">
-                    <span class="act-who">${r.distinct_id}</span>
+                    <span class="act-who" title="${escapeHtml(r.distinct_id || '')}">${escapeHtml(rowDisplayId(r))}</span>
                     <span class="act-time" title="${exact}">${ago}</span>
                     ${rowOrgName(r) ? `<span class="act-page" title="Organization">${rowOrgName(r)}</span>` : ''}
                     ${rowProjectLabel(r) ? `<span class="act-page" title="Project">${rowProjectLabel(r)}</span>` : ''}
@@ -843,7 +962,7 @@
             <div class="act-body">
                 <div class="act-action" title="Session ${group.sessionId}">Session · ${group.rows.length} action${group.rows.length === 1 ? '' : 's'}</div>
                 <div class="act-meta">
-                    <span class="act-who">${r.distinct_id}</span>
+                    <span class="act-who" title="${escapeHtml(r.distinct_id || '')}">${escapeHtml(rowDisplayId(r))}</span>
                     <span class="act-time" title="Latest activity: ${exact}">${ago}</span>
                     ${rowOrgName(r) ? `<span class="act-page" title="Organization">${rowOrgName(r)}</span>` : ''}
                     ${rowProjectLabel(r) ? `<span class="act-page" title="Project">${rowProjectLabel(r)}</span>` : ''}
@@ -942,7 +1061,8 @@
         for (const p of personas) {
             const opt = document.createElement('option');
             opt.value = p.distinct_id;
-            opt.textContent = p.distinct_id;
+            opt.textContent = personaDisplayId(p);
+            if (p.distinct_id && opt.textContent !== p.distinct_id) opt.title = p.distinct_id;
             sel.appendChild(opt);
         }
         if (prev) sel.value = prev;

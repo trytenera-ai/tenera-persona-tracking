@@ -4,14 +4,74 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import and_, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.core.auth import verify_api_key
 from app.core.database import get_db
+from app.models.entity import Entity
 from app.models.event import Event
 from app.models.persona import Persona
 
 router = APIRouter(prefix="/logs", tags=["logs"])
+
+
+def _looks_like_email(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    raw = value.strip()
+    return "@" in raw and "." in raw.rsplit("@", 1)[-1]
+
+
+def _is_uuid_like(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    raw = value.strip().lower()
+    parts = raw.split("-")
+    return (
+        len(parts) == 5
+        and [len(p) for p in parts] == [8, 4, 4, 4, 12]
+        and all(all(c in "0123456789abcdef" for c in p) for p in parts)
+    )
+
+
+def _metadata_email(meta: dict) -> Optional[str]:
+    for key in (
+        "email",
+        "user_email",
+        "userEmail",
+        "auth_email",
+        "primary_email",
+        "preferred_email",
+    ):
+        value = meta.get(key)
+        if isinstance(value, str) and _looks_like_email(value):
+            return value.strip()
+    return None
+
+
+def _persona_display_id(persona: Optional[object], meta: dict) -> Optional[str]:
+    metadata_email = _metadata_email(meta)
+    if metadata_email:
+        return metadata_email
+    if not persona:
+        return None
+    distinct_id = getattr(persona, "distinct_id", None)
+    name = getattr(persona, "name", None)
+    email = getattr(persona, "email", None)
+    if _looks_like_email(email):
+        return email.strip()
+    if _looks_like_email(distinct_id):
+        return distinct_id
+    if _looks_like_email(name):
+        return name.strip()
+    email_entity_keys = {"email", "user_email", "useremail", "auth_email", "primary_email"}
+    for entity in getattr(persona, "entities", None) or []:
+        key = (getattr(entity, "key", None) or "").strip().lower()
+        value = getattr(entity, "value", None)
+        if key in email_entity_keys and _looks_like_email(value):
+            return value.strip()
+    if _is_uuid_like(distinct_id):
+        return "Unknown user"
+    return name or distinct_id
 
 
 def _is_anonymous_clause():
@@ -149,8 +209,8 @@ async def get_activity(
         return []
 
     q = (
-        select(Event)
-        .options(selectinload(Event.persona))
+        select(Event, Persona.id, Persona.distinct_id, Persona.name)
+        .outerjoin(Persona, Event.persona_id == Persona.id)
         .order_by(Event.timestamp.desc())
         .limit(limit)
     )
@@ -160,8 +220,6 @@ async def get_activity(
         q = q.where(Event.timestamp >= cutoff)
 
     prefix_clause = _exclude_prefixes_clause(exclude_prefixes, exclude_prefixes_logic)
-    if distinct_id or hide_anonymous or prefix_clause is not None:
-        q = q.join(Persona)
     if distinct_id:
         q = q.where(Persona.distinct_id == distinct_id)
     if hide_anonymous:
@@ -177,19 +235,52 @@ async def get_activity(
     elif project_name:
         q = q.where(_event_project_clause(project_name))
 
-    rows = (await db.execute(q)).scalars().all()
+    rows = (await db.execute(q)).all()
+    persona_ids = [row[1] for row in rows if row[1]]
+    email_by_persona_id: dict[str, str] = {}
+    if persona_ids:
+        email_entity_keys = {
+            "email",
+            "user_email",
+            "useremail",
+            "auth_email",
+            "primary_email",
+        }
+        entity_rows = (
+            await db.execute(
+                select(Entity.persona_id, Entity.value)
+                .where(Entity.persona_id.in_(persona_ids))
+                .where(func.lower(Entity.key).in_(email_entity_keys))
+            )
+        ).all()
+        for persona_id, value in entity_rows:
+            if persona_id not in email_by_persona_id and _looks_like_email(value):
+                email_by_persona_id[persona_id] = value.strip()
 
     import json
     result = []
-    for e in rows:
+    for e, persona_id, persona_distinct_id, persona_name in rows:
         try:
             meta = json.loads(e.properties) if e.properties else {}
         except Exception:
             meta = {}
+        persona_view = None
+        if persona_distinct_id:
+            persona_view = type(
+                "PersonaDisplay",
+                (),
+                {
+                    "distinct_id": persona_distinct_id,
+                    "name": persona_name,
+                    "email": email_by_persona_id.get(persona_id),
+                },
+            )()
+        display_id = _persona_display_id(persona_view, meta)
         result.append({
             "id": e.id,
             "action": e.event_type,
-            "distinct_id": e.persona.distinct_id if e.persona else None,
+            "distinct_id": persona_distinct_id,
+            "display_id": display_id,
             "timestamp": e.timestamp.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z",
             "created_at": e.timestamp.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z",
             "saved": True,
