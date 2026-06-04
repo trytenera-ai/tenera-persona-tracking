@@ -696,6 +696,40 @@
 
     function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
+    function withTimeout(promise, ms, label) {
+        return Promise.race([
+            promise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error(label || 'Timed out')), ms))
+        ]);
+    }
+
+    function makeFallbackThumbnailDataUrl(el) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 216;
+        canvas.height = 136;
+        const ctx = canvas.getContext('2d');
+        const page = el.dataset.page || 'Replay';
+        ctx.fillStyle = '#f7f5f2';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = '#dedbd6';
+        ctx.strokeRect(0.5, 0.5, canvas.width - 1, canvas.height - 1);
+        ctx.fillStyle = '#111111';
+        ctx.font = 'bold 18px Arial, sans-serif';
+        ctx.fillText('Replay', 18, 42);
+        ctx.fillStyle = '#77716a';
+        ctx.font = '12px Arial, sans-serif';
+        const text = page.length > 26 ? page.slice(0, 25) + '…' : page;
+        ctx.fillText(text, 18, 68);
+        ctx.fillStyle = '#c7c2ba';
+        ctx.beginPath();
+        ctx.moveTo(172, 48);
+        ctx.lineTo(172, 88);
+        ctx.lineTo(202, 68);
+        ctx.closePath();
+        ctx.fill();
+        return canvas.toDataURL('image/jpeg', 0.78);
+    }
+
     async function getSavedSessionThumbnail(sessionId) {
         const data = await fetchJSON(`/api/v1/sessions/${sessionId}/thumbnail`);
         return data && data.thumbnail_url ? data.thumbnail_url : null;
@@ -721,7 +755,9 @@
                 <foreignObject width="100%" height="100%">${serialized}</foreignObject>
             </svg>`;
             const img = new Image();
+            const timeout = setTimeout(() => reject(new Error('Replay SVG image load timed out')), 4000);
             img.onload = () => {
+                clearTimeout(timeout);
                 try {
                     const canvas = document.createElement('canvas');
                     canvas.width = 216;
@@ -733,7 +769,7 @@
                     resolve(canvas.toDataURL('image/jpeg', 0.76));
                 } catch (e) { reject(e); }
             };
-            img.onerror = reject;
+            img.onerror = (e) => { clearTimeout(timeout); reject(e); };
             img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
         });
     }
@@ -743,7 +779,7 @@
         for (let attempt = 0; attempt < 10; attempt++) {
             try {
                 await wait(300 + attempt * 150);
-                const thumbnailUrl = await makeDataUrlFromReplayIframe(el);
+                const thumbnailUrl = await withTimeout(makeDataUrlFromReplayIframe(el), 5000, 'Replay thumbnail conversion timed out');
                 await saveSessionThumbnail(sessionId, thumbnailUrl);
                 setThumbImage(el, thumbnailUrl, sessionId, eventTs);
                 return;
@@ -751,8 +787,14 @@
                 lastError = e;
             }
         }
-        // Keep the live scaled rrweb preview if image persistence is not possible.
-        console.warn('Replay thumbnail persistence failed', lastError);
+        try {
+            const fallbackUrl = makeFallbackThumbnailDataUrl(el);
+            await saveSessionThumbnail(sessionId, fallbackUrl);
+            setThumbImage(el, fallbackUrl, sessionId, eventTs);
+        } catch (_) {
+            // Keep the live scaled rrweb preview if image persistence is not possible.
+            console.warn('Replay thumbnail persistence failed', lastError);
+        }
     }
 
     async function renderReplayThumbnail(el) {
@@ -869,9 +911,11 @@
         }
         if (sessionId) {
             const escSid = sessionId.replace(/'/g, "\\'");
+            const pageLabel = String((meta && (meta.page || meta.url || meta.path || meta.route)) || '').replace(/"/g, '&quot;');
             return `<div class="act-thumb-wrap" id="thumb-${r.id}"
                 data-session="${escSid}"
                 data-ts="${ts}"
+                data-page="${pageLabel}"
                 onclick="openSessionModal('${escSid}',${ts})" title="Click to preview session">
               <div class="act-thumb-placeholder">&#x23F3;</div>
             </div>`;
