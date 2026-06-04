@@ -704,17 +704,22 @@
             .replace(/lab\([^)]*\)/gi, '#111111')
             .replace(/rgb\(from [^)]*\)/gi, '#111111');
 
-        clonedDoc.querySelectorAll('style').forEach(style => {
-            style.textContent = normalizeCss(style.textContent);
-        });
+        // For thumbnails, reliability is more important than perfect styling.
+        // Remove recorded stylesheets from the temporary iframe so html2canvas
+        // cannot choke on unsupported modern CSS. The full replay modal/page
+        // still uses the original rrweb events and styling.
+        clonedDoc.querySelectorAll('style, link').forEach(node => node.remove());
         clonedDoc.querySelectorAll('[style]').forEach(node => {
             node.setAttribute('style', normalizeCss(node.getAttribute('style')));
         });
-        // rrweb may replay stylesheet text on link nodes via attributes. Keep
-        // linked stylesheets, but normalize any captured inline CSS text.
-        clonedDoc.querySelectorAll('link[_cssText]').forEach(link => {
-            link.setAttribute('_cssText', normalizeCss(link.getAttribute('_cssText')));
-        });
+        const fallbackStyle = clonedDoc.createElement('style');
+        fallbackStyle.textContent = `
+            html,body{margin:0;background:#fff;color:#111;font-family:Inter,Arial,sans-serif;font-size:14px;overflow:hidden}
+            *{box-sizing:border-box;max-width:1000px}
+            img,svg,canvas{max-width:100%;height:auto}
+            button,a{font:inherit}
+        `;
+        clonedDoc.head.appendChild(fallbackStyle);
     }
 
     async function renderReplayThumbnail(el) {
