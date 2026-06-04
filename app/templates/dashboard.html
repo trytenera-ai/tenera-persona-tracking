@@ -6,7 +6,7 @@
     <title>Tenera Analytics</title>
     <link rel="icon" href="/favicon.ico" type="image/svg+xml">
     <link rel="stylesheet" href="/static/style.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/rrweb-player@latest/dist/style.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/rrweb-player@1.0.0-alpha.4/dist/style.css">
     <style>
         /* ── Tabs ── */
         .tabs { display: flex; gap: 2px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
@@ -1075,8 +1075,17 @@
         renderFailedEvents(failed);
     }
 
-    initPrefixFilters();
-    loadPersonas();
+    async function initDashboard() {
+        initPrefixFilters();
+        await loadPersonas();
+        // Hydrate Action Log stats/rows on initial page load too. This keeps the
+        // dashboard correct when a browser restores the Action Log tab from bfcache,
+        // when users hard-refresh while focused on that section, or when CSS/DOM
+        // state is stale before the tab click handler runs.
+        await loadLogs();
+    }
+
+    initDashboard();
 </script>
 <!-- Preview modal: shows screenshot image or rrweb session player -->
 <div id="sc-modal" class="sc-modal-backdrop" onclick="closeModal()">
@@ -1087,6 +1096,6 @@
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/rrweb-player@latest/dist/index.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/rrweb-player@1.0.0-alpha.4/dist/index.js"></script>
 </body>
 </html>
