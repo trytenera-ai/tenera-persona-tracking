@@ -739,15 +739,20 @@
     }
 
     async function persistRenderedThumbnail(el, sessionId, eventTs) {
-        try {
-            await wait(250);
-            const thumbnailUrl = await makeDataUrlFromReplayIframe(el);
-            await saveSessionThumbnail(sessionId, thumbnailUrl);
-            setThumbImage(el, thumbnailUrl, sessionId, eventTs);
-        } catch (e) {
-            // Keep the live scaled rrweb preview if image persistence is not possible.
-            console.warn('Replay thumbnail persistence failed', e);
+        let lastError = null;
+        for (let attempt = 0; attempt < 10; attempt++) {
+            try {
+                await wait(300 + attempt * 150);
+                const thumbnailUrl = await makeDataUrlFromReplayIframe(el);
+                await saveSessionThumbnail(sessionId, thumbnailUrl);
+                setThumbImage(el, thumbnailUrl, sessionId, eventTs);
+                return;
+            } catch (e) {
+                lastError = e;
+            }
         }
+        // Keep the live scaled rrweb preview if image persistence is not possible.
+        console.warn('Replay thumbnail persistence failed', lastError);
     }
 
     async function renderReplayThumbnail(el) {
