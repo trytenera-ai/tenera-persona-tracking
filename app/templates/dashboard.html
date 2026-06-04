@@ -76,6 +76,10 @@
             align-items: center; justify-content: center; gap: 4px;
             font-size: 9px; color: var(--text-3); text-align: center; padding: 6px;
         }
+        .act-thumb-img {
+            width: 100%; height: 100%; object-fit: cover; display: block;
+            filter: saturate(0.96); transform: translateZ(0);
+        }
         .act-url-preview {
             width: 108px; height: 68px; display: flex; flex-direction: column;
             align-items: flex-start; justify-content: center; padding: 8px;
@@ -170,6 +174,8 @@
             transition: opacity 0.15s; }
         .sc-thumb:hover { opacity: 0.85; }
     </style>
+<script src="https://cdn.jsdelivr.net/npm/rrweb-player@1.0.0-alpha.4/dist/index.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 </head>
 <body>
 <div class="container">
@@ -669,18 +675,123 @@
     }
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
-    // ── Lazy thumbnail loader ─────────────────────────────────────────────────
+    // ── Static replay thumbnail loader ─────────────────────────────────────────
+    const _thumbImageCache = {};
+    const _thumbQueue = [];
+    let _thumbRunning = 0;
+    const MAX_THUMB_WORKERS = 1;
+
+    function setThumbPlaceholder(el, label) {
+        el.innerHTML = `<div class="act-thumb-placeholder">&#x25B6;<br><span>${label || 'Replay'}</span></div>`;
+    }
+
+    function setThumbImage(el, dataUrl, sessionId, eventTs) {
+        const escSid = (sessionId || '').replace(/'/g, "\\'");
+        el.innerHTML = `<img class="act-thumb-img" src="${dataUrl}" alt="Replay preview"
+            onclick="openSessionModal('${escSid}',${eventTs || 0})" title="Click to preview session">`;
+    }
+
+    function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+    async function renderReplayThumbnail(el) {
+        const sessionId = el.dataset.session;
+        const eventTs = Number(el.dataset.ts || 0);
+        if (!sessionId) return;
+        if (_thumbImageCache[sessionId]) {
+            setThumbImage(el, _thumbImageCache[sessionId], sessionId, eventTs);
+            return;
+        }
+        if (!window.rrwebPlayer || !window.html2canvas) {
+            setThumbPlaceholder(el, 'Replay');
+            return;
+        }
+
+        setThumbPlaceholder(el, 'Loading');
+        const events = await ensureSessionEvents(sessionId);
+        if (!events) {
+            setThumbPlaceholder(el, 'Replay');
+            return;
+        }
+
+        const scratch = document.createElement('div');
+        scratch.style.cssText = 'position:fixed;left:-2000px;top:-2000px;width:1000px;height:625px;overflow:hidden;opacity:0;pointer-events:none;z-index:-1;';
+        document.body.appendChild(scratch);
+        let player = null;
+        try {
+            player = new rrwebPlayer({
+                target: scratch,
+                props: { events, width: 1000, height: 625, autoPlay: false, showController: false, skipInactive: false }
+            });
+            if (eventTs && events.length) {
+                const offset = Math.max(0, eventTs - events[0].timestamp);
+                if (offset > 0) {
+                    await wait(120);
+                    try { player.goto(offset); } catch(e) {}
+                }
+            }
+            await wait(450);
+            const iframe = scratch.querySelector('iframe');
+            const doc = iframe && iframe.contentDocument;
+            const target = doc && (doc.body || doc.documentElement);
+            if (!target) throw new Error('Replay iframe was not ready');
+            const canvas = await html2canvas(target, {
+                backgroundColor: '#ffffff',
+                width: 1000,
+                height: 625,
+                windowWidth: 1000,
+                windowHeight: 625,
+                scale: 0.18,
+                logging: false,
+                useCORS: true,
+                allowTaint: true
+            });
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+            _thumbImageCache[sessionId] = dataUrl;
+            setThumbImage(el, dataUrl, sessionId, eventTs);
+        } catch (e) {
+            console.warn('Replay thumbnail generation failed', e);
+            setThumbPlaceholder(el, 'Replay');
+        } finally {
+            scratch.remove();
+            player = null;
+        }
+    }
+
+    function enqueueThumb(el) {
+        if (!el || el.dataset.loaded) return;
+        el.dataset.loaded = '1';
+        _thumbQueue.push(el);
+        processThumbQueue();
+    }
+
+    async function processThumbQueue() {
+        if (_thumbRunning >= MAX_THUMB_WORKERS) return;
+        const el = _thumbQueue.shift();
+        if (!el) return;
+        _thumbRunning++;
+        try { await renderReplayThumbnail(el); }
+        finally {
+            _thumbRunning--;
+            processThumbQueue();
+        }
+    }
+
     function initThumbObserver() {
-        // Do not instantiate rrweb players for feed thumbnails. Each rrweb player
-        // creates a sandboxed iframe; replaying many thumbnails can flood the
-        // browser console with sandbox/script warnings from recorded pages. Keep
-        // the feed as lightweight placeholders and only create one sanitized
-        // replay iframe when the user explicitly opens the modal.
-        document.querySelectorAll('.act-thumb-wrap[data-session]').forEach(el => {
-            if (el.dataset.loaded) return;
-            el.dataset.loaded = '1';
-            el.innerHTML = '<div class="act-thumb-placeholder">&#x25B6;<br><span>Replay</span></div>';
-        });
+        const thumbs = Array.from(document.querySelectorAll('.act-thumb-wrap[data-session]'));
+        if (!thumbs.length) return;
+        if (!('IntersectionObserver' in window)) {
+            thumbs.slice(0, 8).forEach(enqueueThumb);
+            return;
+        }
+        const observer = new IntersectionObserver(entries => {
+            for (const entry of entries) {
+                if (entry.isIntersecting) {
+                    observer.unobserve(entry.target);
+                    enqueueThumb(entry.target);
+                }
+            }
+        }, { rootMargin: '160px 0px', threshold: 0.01 });
+        thumbs.forEach(el => observer.observe(el));
     }
 
     // ── Thumbnail rendering ────────────────────────────────────────────────────
@@ -1096,6 +1207,5 @@
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/rrweb-player@1.0.0-alpha.4/dist/index.js"></script>
 </body>
 </html>
