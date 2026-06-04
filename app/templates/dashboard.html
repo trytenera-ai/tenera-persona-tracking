@@ -693,6 +693,30 @@
 
     function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
+    function sanitizeHtml2CanvasClone(clonedDoc) {
+        // html2canvas 1.4.x cannot parse some modern CSS color syntaxes that
+        // Next/Tailwind can emit in recorded pages (for example oklab/lab and
+        // rgb(from ...)). The actual full replay still keeps the original CSS;
+        // this only normalizes the temporary cloned DOM used to make a tiny
+        // static thumbnail.
+        const normalizeCss = value => String(value || '')
+            .replace(/oklab\([^)]*\)/gi, '#111111')
+            .replace(/lab\([^)]*\)/gi, '#111111')
+            .replace(/rgb\(from [^)]*\)/gi, '#111111');
+
+        clonedDoc.querySelectorAll('style').forEach(style => {
+            style.textContent = normalizeCss(style.textContent);
+        });
+        clonedDoc.querySelectorAll('[style]').forEach(node => {
+            node.setAttribute('style', normalizeCss(node.getAttribute('style')));
+        });
+        // rrweb may replay stylesheet text on link nodes via attributes. Keep
+        // linked stylesheets, but normalize any captured inline CSS text.
+        clonedDoc.querySelectorAll('link[_cssText]').forEach(link => {
+            link.setAttribute('_cssText', normalizeCss(link.getAttribute('_cssText')));
+        });
+    }
+
     async function renderReplayThumbnail(el) {
         const sessionId = el.dataset.session;
         const eventTs = Number(el.dataset.ts || 0);
@@ -743,7 +767,8 @@
                 scale: 0.18,
                 logging: false,
                 useCORS: true,
-                allowTaint: true
+                allowTaint: true,
+                onclone: sanitizeHtml2CanvasClone
             });
             const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
             _thumbImageCache[sessionId] = dataUrl;
