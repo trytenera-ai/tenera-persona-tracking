@@ -758,6 +758,7 @@
             const doc = iframe && iframe.contentDocument;
             const target = doc && (doc.body || doc.documentElement);
             if (!target) throw new Error('Replay iframe was not ready');
+            sanitizeHtml2CanvasClone(doc);
             const canvas = await html2canvas(target, {
                 backgroundColor: '#ffffff',
                 width: 1000,
