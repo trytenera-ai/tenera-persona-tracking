@@ -65,20 +65,21 @@
             overflow: hidden; position: relative; background: var(--bg-elevated);
             border: 1px solid rgba(0,0,0,0.08); cursor: zoom-in; display: block;
         }
-        /* rrweb-player inside the thumbnail: render at full size, scale visually to 108×68 */
+        /* rrweb-player inside the thumbnail: render large, crop to 108×68, and scale down. */
         .act-thumb-wrap .rr-player {
             position: absolute; top: 0; left: 0;
-            transform: scale(0.1); transform-origin: top left;
+            width: 1000px !important; height: 625px !important;
+            transform: scale(0.108); transform-origin: top left;
             pointer-events: none;
         }
+        .act-thumb-wrap .rr-player__controller,
+        .act-thumb-wrap .rr-controller,
+        .act-thumb-wrap .rr-timeline,
+        .act-thumb-wrap .rr-player__frame + div { display: none !important; }
         .act-thumb-placeholder {
             position: absolute; inset: 0; display: flex; flex-direction: column;
             align-items: center; justify-content: center; gap: 4px;
             font-size: 9px; color: var(--text-3); text-align: center; padding: 6px;
-        }
-        .act-thumb-img {
-            width: 100%; height: 100%; object-fit: cover; display: block;
-            filter: saturate(0.96); transform: translateZ(0);
         }
         .act-url-preview {
             width: 108px; height: 68px; display: flex; flex-direction: column;
@@ -175,7 +176,6 @@
         .sc-thumb:hover { opacity: 0.85; }
     </style>
 <script src="https://cdn.jsdelivr.net/npm/rrweb-player@1.0.0-alpha.4/dist/index.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 </head>
 <body>
 <div class="container">
@@ -675,8 +675,8 @@
     }
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
-    // ── Static replay thumbnail loader ─────────────────────────────────────────
-    const _thumbImageCache = {};
+    // ── Scaled rrweb thumbnail loader ────────────────────────────────────────
+    const _thumbSessionCache = {};
     const _thumbQueue = [];
     let _thumbRunning = 0;
     const MAX_THUMB_WORKERS = 1;
@@ -685,52 +685,13 @@
         el.innerHTML = `<div class="act-thumb-placeholder">&#x25B6;<br><span>${label || 'Replay'}</span></div>`;
     }
 
-    function setThumbImage(el, dataUrl, sessionId, eventTs) {
-        const escSid = (sessionId || '').replace(/'/g, "\\'");
-        el.innerHTML = `<img class="act-thumb-img" src="${dataUrl}" alt="Replay preview"
-            onclick="openSessionModal('${escSid}',${eventTs || 0})" title="Click to preview session">`;
-    }
-
     function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
-
-    function sanitizeHtml2CanvasClone(clonedDoc) {
-        // html2canvas 1.4.x cannot parse some modern CSS color syntaxes that
-        // Next/Tailwind can emit in recorded pages (for example oklab/lab and
-        // rgb(from ...)). The actual full replay still keeps the original CSS;
-        // this only normalizes the temporary cloned DOM used to make a tiny
-        // static thumbnail.
-        const normalizeCss = value => String(value || '')
-            .replace(/oklab\([^)]*\)/gi, '#111111')
-            .replace(/lab\([^)]*\)/gi, '#111111')
-            .replace(/rgb\(from [^)]*\)/gi, '#111111');
-
-        // For thumbnails, reliability is more important than perfect styling.
-        // Remove recorded stylesheets from the temporary iframe so html2canvas
-        // cannot choke on unsupported modern CSS. The full replay modal/page
-        // still uses the original rrweb events and styling.
-        clonedDoc.querySelectorAll('style, link').forEach(node => node.remove());
-        clonedDoc.querySelectorAll('[style]').forEach(node => {
-            node.setAttribute('style', normalizeCss(node.getAttribute('style')));
-        });
-        const fallbackStyle = clonedDoc.createElement('style');
-        fallbackStyle.textContent = `
-            html,body{margin:0;background:#fff;color:#111;font-family:Inter,Arial,sans-serif;font-size:14px;overflow:hidden}
-            *{box-sizing:border-box;max-width:1000px}
-            img,svg,canvas{max-width:100%;height:auto}
-            button,a{font:inherit}
-        `;
-        clonedDoc.head.appendChild(fallbackStyle);
-    }
 
     async function renderReplayThumbnail(el) {
         const sessionId = el.dataset.session;
         const eventTs = Number(el.dataset.ts || 0);
         if (!sessionId) return;
-        if (_thumbImageCache[sessionId]) {
-            setThumbImage(el, _thumbImageCache[sessionId], sessionId, eventTs);
-            return;
-        }
-        if (!window.rrwebPlayer || !window.html2canvas) {
+        if (!window.rrwebPlayer) {
             setThumbPlaceholder(el, 'Replay');
             return;
         }
@@ -742,49 +703,24 @@
             return;
         }
 
-        const scratch = document.createElement('div');
-        scratch.style.cssText = 'position:fixed;left:-2000px;top:-2000px;width:1000px;height:625px;overflow:hidden;opacity:0;pointer-events:none;z-index:-1;';
-        document.body.appendChild(scratch);
-        let player = null;
         try {
-            player = new rrwebPlayer({
-                target: scratch,
+            el.innerHTML = '';
+            const player = new rrwebPlayer({
+                target: el,
                 props: { events, width: 1000, height: 625, autoPlay: false, showController: false, skipInactive: false }
             });
+            _thumbSessionCache[sessionId] = player;
             if (eventTs && events.length) {
                 const offset = Math.max(0, eventTs - events[0].timestamp);
                 if (offset > 0) {
-                    await wait(120);
+                    await wait(150);
                     try { player.goto(offset); } catch(e) {}
                 }
             }
-            await wait(450);
-            const iframe = scratch.querySelector('iframe');
-            const doc = iframe && iframe.contentDocument;
-            const target = doc && (doc.body || doc.documentElement);
-            if (!target) throw new Error('Replay iframe was not ready');
-            sanitizeHtml2CanvasClone(doc);
-            const canvas = await html2canvas(target, {
-                backgroundColor: '#ffffff',
-                width: 1000,
-                height: 625,
-                windowWidth: 1000,
-                windowHeight: 625,
-                scale: 0.18,
-                logging: false,
-                useCORS: true,
-                allowTaint: true,
-                onclone: sanitizeHtml2CanvasClone
-            });
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
-            _thumbImageCache[sessionId] = dataUrl;
-            setThumbImage(el, dataUrl, sessionId, eventTs);
+            el.title = 'Click to preview session';
         } catch (e) {
             console.warn('Replay thumbnail generation failed', e);
             setThumbPlaceholder(el, 'Replay');
-        } finally {
-            scratch.remove();
-            player = null;
         }
     }
 
