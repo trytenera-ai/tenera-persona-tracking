@@ -81,6 +81,9 @@
             align-items: center; justify-content: center; gap: 4px;
             font-size: 9px; color: var(--text-3); text-align: center; padding: 6px;
         }
+        .act-thumb-img {
+            width: 100%; height: 100%; object-fit: cover; display: block;
+        }
         .act-url-preview {
             width: 108px; height: 68px; display: flex; flex-direction: column;
             align-items: flex-start; justify-content: center; padding: 8px;
@@ -685,12 +688,79 @@
         el.innerHTML = `<div class="act-thumb-placeholder">&#x25B6;<br><span>${label || 'Replay'}</span></div>`;
     }
 
+    function setThumbImage(el, thumbnailUrl, sessionId, eventTs) {
+        const escSid = (sessionId || '').replace(/'/g, "\\'");
+        el.innerHTML = `<img class="act-thumb-img" src="${thumbnailUrl}" alt="Replay preview"
+            onclick="openSessionModal('${escSid}',${eventTs || 0})" title="Click to preview session">`;
+    }
+
     function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+    async function getSavedSessionThumbnail(sessionId) {
+        const data = await fetchJSON(`/api/v1/sessions/${sessionId}/thumbnail`);
+        return data && data.thumbnail_url ? data.thumbnail_url : null;
+    }
+
+    async function saveSessionThumbnail(sessionId, thumbnailUrl) {
+        if (!sessionId || !thumbnailUrl || !thumbnailUrl.startsWith('data:image/')) return;
+        await fetchJSON(`/api/v1/sessions/${sessionId}/thumbnail`, {
+            method: 'PUT',
+            body: JSON.stringify({ thumbnail_url: thumbnailUrl })
+        });
+    }
+
+    function makeDataUrlFromReplayIframe(el) {
+        return new Promise((resolve, reject) => {
+            const iframe = el.querySelector('iframe');
+            const doc = iframe && iframe.contentDocument;
+            if (!doc || !doc.documentElement) return reject(new Error('Replay iframe not ready'));
+            const clone = doc.documentElement.cloneNode(true);
+            clone.querySelectorAll('script').forEach(node => node.remove());
+            const serialized = new XMLSerializer().serializeToString(clone);
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="625">
+                <foreignObject width="100%" height="100%">${serialized}</foreignObject>
+            </svg>`;
+            const img = new Image();
+            img.onload = () => {
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 216;
+                    canvas.height = 136;
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(img, 0, 0, 1000, 625, 0, 0, canvas.width, canvas.height);
+                    resolve(canvas.toDataURL('image/jpeg', 0.76));
+                } catch (e) { reject(e); }
+            };
+            img.onerror = reject;
+            img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+        });
+    }
+
+    async function persistRenderedThumbnail(el, sessionId, eventTs) {
+        try {
+            await wait(250);
+            const thumbnailUrl = await makeDataUrlFromReplayIframe(el);
+            await saveSessionThumbnail(sessionId, thumbnailUrl);
+            setThumbImage(el, thumbnailUrl, sessionId, eventTs);
+        } catch (e) {
+            // Keep the live scaled rrweb preview if image persistence is not possible.
+            console.warn('Replay thumbnail persistence failed', e);
+        }
+    }
 
     async function renderReplayThumbnail(el) {
         const sessionId = el.dataset.session;
         const eventTs = Number(el.dataset.ts || 0);
         if (!sessionId) return;
+
+        const saved = await getSavedSessionThumbnail(sessionId);
+        if (saved) {
+            setThumbImage(el, saved, sessionId, eventTs);
+            return;
+        }
+
         if (!window.rrwebPlayer) {
             setThumbPlaceholder(el, 'Replay');
             return;
@@ -718,6 +788,7 @@
                 }
             }
             el.title = 'Click to preview session';
+            persistRenderedThumbnail(el, sessionId, eventTs);
         } catch (e) {
             console.warn('Replay thumbnail generation failed', e);
             setThumbPlaceholder(el, 'Replay');
