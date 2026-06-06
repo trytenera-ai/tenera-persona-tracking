@@ -145,7 +145,7 @@ async def get_stats(
     organization_name: Optional[str] = Query(default=None),
     project_name: Optional[str] = Query(default=None),
     project_id: Optional[str] = Query(default=None),
-    hours: Optional[int] = Query(default=24, ge=1, description="Time window in hours; 0 = all time"),
+    hours: Optional[int] = Query(default=24, ge=0, description="Time window in hours; 0 = all time"),
     _: str = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ):
@@ -188,7 +188,7 @@ async def get_stats(
 
 @router.get("/activity")
 async def get_activity(
-    limit: int = Query(100, le=500),
+    limit: int = Query(100, le=5000),
     saved: Optional[bool] = Query(None),
     distinct_id: Optional[str] = Query(None),
     env: Optional[str] = Query(default=None, pattern="^(production|staging)$"),
@@ -200,7 +200,7 @@ async def get_activity(
     organization_name: Optional[str] = Query(default=None),
     project_name: Optional[str] = Query(default=None),
     project_id: Optional[str] = Query(default=None),
-    hours: Optional[int] = Query(default=None, ge=1, description="Time window in hours; omit for all time"),
+    hours: Optional[int] = Query(default=None, ge=0, description="Time window in hours; 0 or omit for all time"),
     _: str = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ):

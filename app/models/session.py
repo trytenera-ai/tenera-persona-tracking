@@ -15,6 +15,7 @@ class Session(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     persona_id: Mapped[str] = mapped_column(String(36), ForeignKey("personas.id"), nullable=False, index=True)
     url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    thumbnail_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     persona: Mapped["Persona"] = relationship("Persona", back_populates="sessions")
     batches: Mapped[List["SessionEventBatch"]] = relationship(
