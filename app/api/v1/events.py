@@ -53,7 +53,9 @@ def _profile_properties(body: IdentifyRequest) -> dict[str, str]:
     return props
 
 
-async def _apply_identify_profile(db: AsyncSession, persona: Persona, body: IdentifyRequest) -> None:
+async def _apply_identify_profile(
+    db: AsyncSession, persona: Persona, body: IdentifyRequest
+) -> None:
     props = _profile_properties(body)
     if not props:
         return
