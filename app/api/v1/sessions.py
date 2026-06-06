@@ -231,6 +231,7 @@ async def update_session_thumbnail(
     await db.commit()
 
 
+
 @router.get("/{session_id}/events")
 async def get_session_events(
     session_id: str,

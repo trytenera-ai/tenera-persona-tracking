@@ -6,7 +6,7 @@
     <title>Tenera Analytics</title>
     <link rel="icon" href="/favicon.ico" type="image/svg+xml">
     <link rel="stylesheet" href="/static/style.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/rrweb-player@latest/dist/style.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/rrweb-player@1.0.0-alpha.4/dist/style.css">
     <style>
         /* ── Tabs ── */
         .tabs { display: flex; gap: 2px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
@@ -65,16 +65,24 @@
             overflow: hidden; position: relative; background: var(--bg-elevated);
             border: 1px solid rgba(0,0,0,0.08); cursor: zoom-in; display: block;
         }
-        /* rrweb-player inside the thumbnail: render at full size, scale visually to 108×68 */
+        /* rrweb-player inside the thumbnail: render large, crop to 108×68, and scale down. */
         .act-thumb-wrap .rr-player {
             position: absolute; top: 0; left: 0;
-            transform: scale(0.1); transform-origin: top left;
+            width: 1000px !important; height: 625px !important;
+            transform: scale(0.108); transform-origin: top left;
             pointer-events: none;
         }
+        .act-thumb-wrap .rr-player__controller,
+        .act-thumb-wrap .rr-controller,
+        .act-thumb-wrap .rr-timeline,
+        .act-thumb-wrap .rr-player__frame + div { display: none !important; }
         .act-thumb-placeholder {
             position: absolute; inset: 0; display: flex; flex-direction: column;
             align-items: center; justify-content: center; gap: 4px;
             font-size: 9px; color: var(--text-3); text-align: center; padding: 6px;
+        }
+        .act-thumb-img {
+            width: 100%; height: 100%; object-fit: cover; display: block;
         }
         .act-url-preview {
             width: 108px; height: 68px; display: flex; flex-direction: column;
@@ -177,6 +185,7 @@
         .avatar-action { font-size:10px; color:var(--text-2); border:1px solid var(--border-md); border-radius:5px; padding:2px 6px; cursor:pointer; background:var(--bg-elevated); font-family:inherit; }
         .avatar-action:hover { color:var(--text-1); border-color:var(--text-2); }
     </style>
+<script src="https://cdn.jsdelivr.net/npm/rrweb-player@1.0.0-alpha.4/dist/index.js"></script>
 </head>
 <body>
 <div class="container">
@@ -788,18 +797,205 @@
     }
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
-    // ── Lazy thumbnail loader ─────────────────────────────────────────────────
-    function initThumbObserver() {
-        // Do not instantiate rrweb players for feed thumbnails. Each rrweb player
-        // creates a sandboxed iframe; replaying many thumbnails can flood the
-        // browser console with sandbox/script warnings from recorded pages. Keep
-        // the feed as lightweight placeholders and only create one sanitized
-        // replay iframe when the user explicitly opens the modal.
-        document.querySelectorAll('.act-thumb-wrap[data-session]').forEach(el => {
-            if (el.dataset.loaded) return;
-            el.dataset.loaded = '1';
-            el.innerHTML = '<div class="act-thumb-placeholder">&#x25B6;<br><span>Replay</span></div>';
+    // ── Scaled rrweb thumbnail loader ────────────────────────────────────────
+    const _thumbSessionCache = {};
+    const _thumbQueue = [];
+    let _thumbRunning = 0;
+    const MAX_THUMB_WORKERS = 1;
+
+    function setThumbPlaceholder(el, label) {
+        el.innerHTML = `<div class="act-thumb-placeholder">&#x25B6;<br><span>${label || 'Replay'}</span></div>`;
+    }
+
+    function setThumbImage(el, thumbnailUrl, sessionId, eventTs) {
+        const escSid = (sessionId || '').replace(/'/g, "\\'");
+        el.innerHTML = `<img class="act-thumb-img" src="${thumbnailUrl}" alt="Replay preview"
+            onclick="openSessionModal('${escSid}',${eventTs || 0})" title="Click to preview session">`;
+    }
+
+    function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+    function withTimeout(promise, ms, label) {
+        return Promise.race([
+            promise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error(label || 'Timed out')), ms))
+        ]);
+    }
+
+    function makeFallbackThumbnailDataUrl(el) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 216;
+        canvas.height = 136;
+        const ctx = canvas.getContext('2d');
+        const page = el.dataset.page || 'Replay';
+        ctx.fillStyle = '#f7f5f2';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = '#dedbd6';
+        ctx.strokeRect(0.5, 0.5, canvas.width - 1, canvas.height - 1);
+        ctx.fillStyle = '#111111';
+        ctx.font = 'bold 18px Arial, sans-serif';
+        ctx.fillText('Replay', 18, 42);
+        ctx.fillStyle = '#77716a';
+        ctx.font = '12px Arial, sans-serif';
+        const text = page.length > 26 ? page.slice(0, 25) + '…' : page;
+        ctx.fillText(text, 18, 68);
+        ctx.fillStyle = '#c7c2ba';
+        ctx.beginPath();
+        ctx.moveTo(172, 48);
+        ctx.lineTo(172, 88);
+        ctx.lineTo(202, 68);
+        ctx.closePath();
+        ctx.fill();
+        return canvas.toDataURL('image/jpeg', 0.78);
+    }
+
+    async function getSavedSessionThumbnail(sessionId) {
+        const data = await fetchJSON(`/api/v1/sessions/${sessionId}/thumbnail`);
+        return data && data.thumbnail_url ? data.thumbnail_url : null;
+    }
+
+    async function saveSessionThumbnail(sessionId, thumbnailUrl) {
+        if (!sessionId || !thumbnailUrl || !thumbnailUrl.startsWith('data:image/')) return;
+        await fetchJSON(`/api/v1/sessions/${sessionId}/thumbnail`, {
+            method: 'PUT',
+            body: JSON.stringify({ thumbnail_url: thumbnailUrl })
         });
+    }
+
+    function makeDataUrlFromReplayIframe(el) {
+        return new Promise((resolve, reject) => {
+            const iframe = el.querySelector('iframe');
+            const doc = iframe && iframe.contentDocument;
+            if (!doc || !doc.documentElement) return reject(new Error('Replay iframe not ready'));
+            const clone = doc.documentElement.cloneNode(true);
+            clone.querySelectorAll('script').forEach(node => node.remove());
+            const serialized = new XMLSerializer().serializeToString(clone);
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="625">
+                <foreignObject width="100%" height="100%">${serialized}</foreignObject>
+            </svg>`;
+            const img = new Image();
+            const timeout = setTimeout(() => reject(new Error('Replay SVG image load timed out')), 4000);
+            img.onload = () => {
+                clearTimeout(timeout);
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 216;
+                    canvas.height = 136;
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(img, 0, 0, 1000, 625, 0, 0, canvas.width, canvas.height);
+                    resolve(canvas.toDataURL('image/jpeg', 0.76));
+                } catch (e) { reject(e); }
+            };
+            img.onerror = (e) => { clearTimeout(timeout); reject(e); };
+            img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+        });
+    }
+
+    async function persistRenderedThumbnail(el, sessionId, eventTs) {
+        let lastError = null;
+        for (let attempt = 0; attempt < 10; attempt++) {
+            try {
+                await wait(300 + attempt * 150);
+                const thumbnailUrl = await withTimeout(makeDataUrlFromReplayIframe(el), 5000, 'Replay thumbnail conversion timed out');
+                await saveSessionThumbnail(sessionId, thumbnailUrl);
+                setThumbImage(el, thumbnailUrl, sessionId, eventTs);
+                return;
+            } catch (e) {
+                lastError = e;
+            }
+        }
+        try {
+            const fallbackUrl = makeFallbackThumbnailDataUrl(el);
+            await saveSessionThumbnail(sessionId, fallbackUrl);
+            setThumbImage(el, fallbackUrl, sessionId, eventTs);
+        } catch (_) {
+            // Keep the live scaled rrweb preview if image persistence is not possible.
+            console.warn('Replay thumbnail persistence failed', lastError);
+        }
+    }
+
+    async function renderReplayThumbnail(el) {
+        const sessionId = el.dataset.session;
+        const eventTs = Number(el.dataset.ts || 0);
+        if (!sessionId) return;
+
+        const saved = await getSavedSessionThumbnail(sessionId);
+        if (saved) {
+            setThumbImage(el, saved, sessionId, eventTs);
+            return;
+        }
+
+        if (!window.rrwebPlayer) {
+            setThumbPlaceholder(el, 'Replay');
+            return;
+        }
+
+        setThumbPlaceholder(el, 'Loading');
+        const events = await ensureSessionEvents(sessionId);
+        if (!events) {
+            setThumbPlaceholder(el, 'Replay');
+            return;
+        }
+
+        try {
+            el.innerHTML = '';
+            const player = new rrwebPlayer({
+                target: el,
+                props: { events, width: 1000, height: 625, autoPlay: false, showController: false, skipInactive: false }
+            });
+            _thumbSessionCache[sessionId] = player;
+            if (eventTs && events.length) {
+                const offset = Math.max(0, eventTs - events[0].timestamp);
+                if (offset > 0) {
+                    await wait(150);
+                    try { player.goto(offset); } catch(e) {}
+                }
+            }
+            el.title = 'Click to preview session';
+            persistRenderedThumbnail(el, sessionId, eventTs);
+        } catch (e) {
+            console.warn('Replay thumbnail generation failed', e);
+            setThumbPlaceholder(el, 'Replay');
+        }
+    }
+
+    function enqueueThumb(el) {
+        if (!el || el.dataset.loaded) return;
+        el.dataset.loaded = '1';
+        _thumbQueue.push(el);
+        processThumbQueue();
+    }
+
+    async function processThumbQueue() {
+        if (_thumbRunning >= MAX_THUMB_WORKERS) return;
+        const el = _thumbQueue.shift();
+        if (!el) return;
+        _thumbRunning++;
+        try { await renderReplayThumbnail(el); }
+        finally {
+            _thumbRunning--;
+            processThumbQueue();
+        }
+    }
+
+    function initThumbObserver() {
+        const thumbs = Array.from(document.querySelectorAll('.act-thumb-wrap[data-session]'));
+        if (!thumbs.length) return;
+        if (!('IntersectionObserver' in window)) {
+            thumbs.slice(0, 8).forEach(enqueueThumb);
+            return;
+        }
+        const observer = new IntersectionObserver(entries => {
+            for (const entry of entries) {
+                if (entry.isIntersecting) {
+                    observer.unobserve(entry.target);
+                    enqueueThumb(entry.target);
+                }
+            }
+        }, { rootMargin: '160px 0px', threshold: 0.01 });
+        thumbs.forEach(el => observer.observe(el));
     }
 
     // ── Thumbnail rendering ────────────────────────────────────────────────────
@@ -834,9 +1030,11 @@
         }
         if (sessionId) {
             const escSid = sessionId.replace(/'/g, "\\'");
+            const pageLabel = String((meta && (meta.page || meta.url || meta.path || meta.route)) || '').replace(/"/g, '&quot;');
             return `<div class="act-thumb-wrap" id="thumb-${r.id}"
                 data-session="${escSid}"
                 data-ts="${ts}"
+                data-page="${pageLabel}"
                 onclick="openSessionModal('${escSid}',${ts})" title="Click to preview session">
               <div class="act-thumb-placeholder">&#x23F3;</div>
             </div>`;
@@ -1195,8 +1393,17 @@
         renderFailedEvents(failed);
     }
 
-    initPrefixFilters();
-    loadPersonas();
+    async function initDashboard() {
+        initPrefixFilters();
+        await loadPersonas();
+        // Hydrate Action Log stats/rows on initial page load too. This keeps the
+        // dashboard correct when a browser restores the Action Log tab from bfcache,
+        // when users hard-refresh while focused on that section, or when CSS/DOM
+        // state is stale before the tab click handler runs.
+        await loadLogs();
+    }
+
+    initDashboard();
 </script>
 <!-- Preview modal: shows screenshot image or rrweb session player -->
 <div id="sc-modal" class="sc-modal-backdrop" onclick="closeModal()">
@@ -1207,6 +1414,5 @@
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/rrweb-player@latest/dist/index.js"></script>
 </body>
 </html>
