@@ -220,8 +220,12 @@ async def update_session_thumbnail(
     session = await db.get(Session, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    if not body.thumbnail_url.startswith("data:image/"):
-        raise HTTPException(status_code=400, detail="thumbnail_url must be a data:image URL")
+    if not (
+        body.thumbnail_url.startswith("data:image/")
+        or body.thumbnail_url.startswith("https://")
+        or body.thumbnail_url.startswith("http://")
+    ):
+        raise HTTPException(status_code=400, detail="thumbnail_url must be an image data/http URL")
     session.thumbnail_url = body.thumbnail_url
     session.updated_at = _now_utc()
     await db.commit()

@@ -1,10 +1,15 @@
+import base64
+import hashlib
+import logging
 from typing import List, Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, exists, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import verify_api_key
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.entity import Entity
 from app.models.event import Event
@@ -107,6 +112,82 @@ def _persona_env_exists(env: str):
     )
 
 
+_AVATAR_DATA_PREFIX = "data:image/"
+
+def _is_allowed_avatar_url(value: str) -> bool:
+    if value.startswith(_AVATAR_DATA_PREFIX):
+        return True
+    parsed = urlparse(value)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _split_avatar_data(value: str) -> tuple[bytes, str, str]:
+    raw = value.strip()
+    content_type = "image/png"
+    b64 = raw
+    if raw.startswith("data:"):
+        header, _, payload = raw.partition(",")
+        if not payload or ";base64" not in header:
+            raise HTTPException(status_code=400, detail="avatar_data must be base64 image data")
+        content_type = header.removeprefix("data:").split(";", 1)[0] or content_type
+        b64 = payload
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="avatar_data must be an image")
+    try:
+        image_bytes = base64.b64decode(b64, validate=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="avatar_data must be valid base64") from exc
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="avatar_data cannot be empty")
+    if len(image_bytes) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="avatar_data must be 2MB or smaller")
+    ext = content_type.split("/", 1)[1].split("+", 1)[0] or "png"
+    if ext == "jpeg":
+        ext = "jpg"
+    return image_bytes, content_type, ext
+
+
+async def _avatar_url_from_profile_input(
+    *, avatar_url: Optional[str], avatar_data: Optional[str]
+) -> Optional[str]:
+    if avatar_data:
+        image_bytes, content_type, ext = _split_avatar_data(avatar_data)
+        if not settings.supabase_url or not settings.supabase_service_key:
+            encoded = base64.b64encode(image_bytes).decode("ascii")
+            return f"data:{content_type};base64,{encoded}"
+        try:
+            from supabase import create_client  # lazy import
+
+            file_hash = hashlib.sha256(image_bytes).hexdigest()
+            path = f"{file_hash}.{ext}"
+            client = create_client(settings.supabase_url, settings.supabase_service_key)
+            existing = client.storage.from_("avatars").list("", {"search": path})
+            already_exists = any(f.get("name") == path for f in (existing or []))
+            if not already_exists:
+                client.storage.from_("avatars").upload(
+                    path, image_bytes, {"content-type": content_type, "upsert": "false"}
+                )
+            return client.storage.from_("avatars").get_public_url(path)
+        except Exception as exc:
+            logging.getLogger(__name__).error(
+                "avatar upload failed: %s — storing data URL", exc
+            )
+            encoded = base64.b64encode(image_bytes).decode("ascii")
+            return f"data:{content_type};base64,{encoded}"
+
+    if avatar_url is not None:
+        trimmed = avatar_url.strip()
+        if not trimmed:
+            return None
+        if not _is_allowed_avatar_url(trimmed):
+            raise HTTPException(
+                status_code=400, detail="avatar_url must be http(s) or data:image URL"
+            )
+        return trimmed
+
+    return None
+
+
 # --- Persona CRUD ---
 
 
@@ -120,7 +201,15 @@ async def create_persona(body: PersonaCreate, db: AsyncSession = Depends(get_db)
             detail=f"Persona with distinct_id '{body.distinct_id}' already exists",
         )
 
-    persona = Persona(distinct_id=body.distinct_id, name=body.name, description=body.description)
+    avatar_url = await _avatar_url_from_profile_input(
+        avatar_url=body.avatar_url, avatar_data=body.avatar_data
+    )
+    persona = Persona(
+        distinct_id=body.distinct_id,
+        name=body.name,
+        description=body.description,
+        avatar_url=avatar_url,
+    )
     db.add(persona)
     await db.flush()  # Ensure persona.id is populated before creating entities
 
@@ -196,6 +285,14 @@ async def update_persona(
         persona.name = body.name
     if body.description is not None:
         persona.description = body.description
+    if body.avatar_data is not None:
+        persona.avatar_url = await _avatar_url_from_profile_input(
+            avatar_url=None, avatar_data=body.avatar_data
+        )
+    elif "avatar_url" in body.model_fields_set:
+        persona.avatar_url = await _avatar_url_from_profile_input(
+            avatar_url=body.avatar_url, avatar_data=None
+        )
 
     await db.commit()
     await db.refresh(persona)

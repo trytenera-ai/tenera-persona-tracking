@@ -3,7 +3,6 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-
 # --- Entity schemas ---
 
 
@@ -59,6 +58,13 @@ class PersonaCreate(BaseModel):
     )
     name: Optional[str] = Field(default=None, max_length=255)
     description: Optional[str] = None
+    avatar_url: Optional[str] = Field(
+        default=None, description="Public avatar image URL or data:image URL"
+    )
+    avatar_data: Optional[str] = Field(
+        default=None,
+        description="Base64 avatar image data; server uploads to storage when configured",
+    )
     entities: Optional[List[EntitySet]] = Field(
         default=None, description="Initial key-value entities to set on the persona."
     )
@@ -69,6 +75,14 @@ class PersonaUpdate(BaseModel):
 
     name: Optional[str] = None
     description: Optional[str] = None
+    avatar_url: Optional[str] = Field(
+        default=None,
+        description="Public avatar image URL or data:image URL. Null clears the avatar.",
+    )
+    avatar_data: Optional[str] = Field(
+        default=None,
+        description="Base64 avatar image data; server uploads to storage when configured",
+    )
 
 
 class PersonaResponse(BaseModel):
@@ -76,6 +90,7 @@ class PersonaResponse(BaseModel):
     distinct_id: str
     name: Optional[str]
     description: Optional[str]
+    avatar_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     entities: List[EntityResponse] = []

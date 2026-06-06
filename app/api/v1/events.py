@@ -4,7 +4,7 @@ import base64
 import hashlib
 import json
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -29,6 +29,7 @@ class IdentifyRequest(BaseModel):
 
     anon_id: str = Field(..., max_length=255)
     distinct_id: str = Field(..., max_length=255)
+    properties: dict[str, Any] = Field(default_factory=dict)
 
 
 class IdentifyResponse(BaseModel):
@@ -36,6 +37,47 @@ class IdentifyResponse(BaseModel):
     anon_id: str
     merged: bool
     persona_id: str
+
+
+def _profile_properties(body: IdentifyRequest) -> dict[str, str]:
+    props: dict[str, str] = {}
+    for key, value in (body.properties or {}).items():
+        if value is None:
+            continue
+        if isinstance(value, (str, int, float, bool)):
+            raw = str(value).strip()
+            if raw:
+                props[str(key).strip()[:255]] = raw[:2000]
+    if body.distinct_id and "email" not in props and "@" in body.distinct_id:
+        props["email"] = body.distinct_id
+    return props
+
+
+async def _apply_identify_profile(
+    db: AsyncSession, persona: Persona, body: IdentifyRequest
+) -> None:
+    props = _profile_properties(body)
+    if not props:
+        return
+
+    display_name = props.get("name") or props.get("full_name")
+    if display_name and not persona.name:
+        persona.name = display_name[:255]
+
+    existing = {
+        row[0]: row[1]
+        for row in (
+            await db.execute(select(Entity.key, Entity).where(Entity.persona_id == persona.id))
+        ).all()
+    }
+    for key, value in props.items():
+        if not key:
+            continue
+        current = existing.get(key)
+        if current:
+            current.value = value
+        else:
+            db.add(Entity(persona_id=persona.id, key=key, value=value))
 
 
 def _header_scope(request: Request) -> dict:
@@ -204,6 +246,7 @@ async def identify_persona(
     distinct_id = body.distinct_id.strip()
     if not anon_id or not distinct_id:
         raise HTTPException(status_code=400, detail="anon_id and distinct_id are required")
+    identify_properties = {"anon_id": anon_id, "merged": False, **_profile_properties(body)}
 
     known_result = await db.execute(select(Persona).where(Persona.distinct_id == distinct_id))
     known = known_result.scalar_one_or_none()
@@ -218,11 +261,12 @@ async def identify_persona(
             known = Persona(distinct_id=distinct_id)
             db.add(known)
             await db.flush()
+        await _apply_identify_profile(db, known, body)
         db.add(
             Event(
                 persona_id=known.id,
                 event_type="identify",
-                properties=json.dumps({"anon_id": anon_id, "merged": False}),
+                properties=json.dumps(identify_properties),
                 timestamp=datetime.now(timezone.utc),
             )
         )
@@ -239,11 +283,13 @@ async def identify_persona(
     # and just rename it. This keeps all foreign keys intact.
     if not known:
         anon.distinct_id = distinct_id
+        identify_properties["merged"] = True
+        await _apply_identify_profile(db, anon, body)
         db.add(
             Event(
                 persona_id=anon.id,
                 event_type="identify",
-                properties=json.dumps({"anon_id": anon_id, "merged": True}),
+                properties=json.dumps(identify_properties),
                 timestamp=datetime.now(timezone.utc),
             )
         )
@@ -285,11 +331,13 @@ async def identify_persona(
             entity.persona_id = known.id
             known_entity_keys.add(entity.key)
 
+    identify_properties["merged"] = True
+    await _apply_identify_profile(db, known, body)
     db.add(
         Event(
             persona_id=known.id,
             event_type="identify",
-            properties=json.dumps({"anon_id": anon_id, "merged": True}),
+            properties=json.dumps(identify_properties),
             timestamp=datetime.now(timezone.utc),
         )
     )

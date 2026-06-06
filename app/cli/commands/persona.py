@@ -17,6 +17,7 @@ def create(
     distinct_id: str = typer.Argument(..., help="Unique identifier for the persona"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="Display name"),
     description: Optional[str] = typer.Option(None, "--desc", "-d", help="Description"),
+    avatar_url: Optional[str] = typer.Option(None, "--avatar-url", help="Avatar image URL"),
     entity: Optional[List[str]] = typer.Option(
         None, "--entity", "-e", help="Key=value entity pair (repeatable)"
     ),
@@ -27,6 +28,8 @@ def create(
         body["name"] = name
     if description:
         body["description"] = description
+    if avatar_url:
+        body["avatar_url"] = avatar_url
     if entity:
         entities = []
         for pair in entity:
@@ -49,7 +52,9 @@ def create(
 
 @app.command("list")
 def list_personas(
-    search: Optional[str] = typer.Option(None, "--search", "-s", help="Search by distinct_id or name"),
+    search: Optional[str] = typer.Option(
+        None, "--search", "-s", help="Search by distinct_id or name"
+    ),
     limit: int = typer.Option(50, "--limit", "-l"),
 ):
     """List all personas."""
@@ -98,6 +103,7 @@ def get(
     console.print(f"  ID:          {persona['id']}")
     console.print(f"  Name:        {persona.get('name') or '--'}")
     console.print(f"  Description: {persona.get('description') or '--'}")
+    console.print(f"  Avatar URL:  {persona.get('avatar_url') or '--'}")
     console.print(f"  Created:     {persona['created_at']}")
     console.print(f"  Updated:     {persona['updated_at']}")
 
@@ -115,6 +121,8 @@ def update(
     distinct_id: str = typer.Argument(..., help="Persona distinct_id"),
     name: Optional[str] = typer.Option(None, "--name", "-n"),
     description: Optional[str] = typer.Option(None, "--desc", "-d"),
+    avatar_url: Optional[str] = typer.Option(None, "--avatar-url"),
+    clear_avatar: bool = typer.Option(False, "--clear-avatar"),
 ):
     """Update a persona's name or description."""
     resp = api("GET", "/api/v1/personas", params={"search": distinct_id, "limit": 1})
@@ -129,9 +137,16 @@ def update(
         body["name"] = name
     if description is not None:
         body["description"] = description
+    if avatar_url is not None:
+        body["avatar_url"] = avatar_url
+    if clear_avatar:
+        body["avatar_url"] = None
 
     if not body:
-        console.print("[yellow]Nothing to update -- provide --name or --desc[/yellow]")
+        console.print(
+            "[yellow]Nothing to update -- provide --name, --desc, "
+            "--avatar-url, or --clear-avatar[/yellow]"
+        )
         raise typer.Exit(1)
 
     api("PATCH", f"/api/v1/personas/{persona_id}", json=body)
