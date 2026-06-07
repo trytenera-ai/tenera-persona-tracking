@@ -213,10 +213,15 @@ async def get_session_thumbnail(
 async def update_session_thumbnail(
     session_id: str,
     body: SessionThumbnailUpdate,
-    _: str = Depends(verify_api_key),
+    _: str = Depends(verify_track_key),
     db: AsyncSession = Depends(get_db),
 ):
-    """Persist a small dashboard thumbnail generated from the replay preview."""
+    """Persist a small dashboard thumbnail generated from the replay preview.
+
+    This accepts the browser-safe write key because the tracking snippet creates
+    the thumbnail client-side after it creates the rrweb session. Read access to
+    thumbnails and replay events still requires the full API key.
+    """
     session = await db.get(Session, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
