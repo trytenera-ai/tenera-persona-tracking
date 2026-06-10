@@ -391,7 +391,7 @@
 
     function isAnonymousDistinctId(distinctId) {
         const did = String(distinctId || '').toLowerCase();
-        return did.startsWith('anon_') || did.startsWith('anonymous');
+        return did.startsWith('anon_') || did.startsWith('anonymous') || isUuidLike(did);
     }
 
     function isEmailLike(value) {

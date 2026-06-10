@@ -17,7 +17,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("sessions", sa.Column("thumbnail_url", sa.Text(), nullable=True))
+    op.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS thumbnail_url TEXT")
 
 
 def downgrade() -> None:
