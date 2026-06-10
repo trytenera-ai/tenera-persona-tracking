@@ -74,11 +74,15 @@ def _persona_display_id(persona: Optional[object], meta: dict) -> Optional[str]:
     return name or distinct_id
 
 
+_UUID_RE = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+
 def _is_anonymous_clause():
     return or_(
         Persona.distinct_id.startswith("anon_"),
         Persona.distinct_id.startswith("anonymous"),
         func.coalesce(Persona.name, "") == "anonymous",
+        Persona.distinct_id.op("~*")(_UUID_RE),
     )
 
 
