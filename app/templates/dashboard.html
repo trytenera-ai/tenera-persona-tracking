@@ -374,7 +374,8 @@
 
     function isAnonymousDistinctId(distinctId) {
         const did = String(distinctId || '').toLowerCase();
-        return did.startsWith('anon_') || did.startsWith('anonymous');
+        return did.startsWith('anon_') || did.startsWith('anonymous') ||
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(did);
     }
 
     function dashboardQuery(extra = {}) {
@@ -432,8 +433,11 @@
 
         if (personas) {
             document.getElementById('persona-count').textContent = personas.count;
-            renderPersonas(personas.results, personaScopeByDistinct);
-            populateUserFilter(personas.results);
+            const visiblePersonas = hideAnonymous
+                ? personas.results.filter(p => !isAnonymousDistinctId(p.distinct_id))
+                : personas.results;
+            renderPersonas(visiblePersonas, personaScopeByDistinct);
+            populateUserFilter(visiblePersonas);
         }
 
         if (sessions !== null) {
