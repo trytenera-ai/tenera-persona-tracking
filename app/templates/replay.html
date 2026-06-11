@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Session Replay · Tenera</title>
   <link rel="stylesheet" href="/static/style.css">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/rrweb-player@latest/dist/style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/rrweb-player@1.1.3/dist/style.css">
   <style>
     body { background: var(--bg-base); display: flex; flex-direction: column; align-items: center; padding: 32px 16px; min-height: 100vh; }
     .replay-header { width: 100%; max-width: 1100px; display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
@@ -14,6 +14,44 @@
     .replay-header h2 { font-size: 15px; font-weight: 600; color: var(--text-1); }
     #player-wrap { width: 100%; max-width: 1100px; }
     #loading { color: var(--text-3); font-size: 13px; text-align: center; padding: 48px; }
+    /* Ensure the rrweb-player timeline row stays horizontal with a visible progress bar.
+       Our page-level styles (flex column on body, CSS vars) can collapse the timeline. */
+    .rr-timeline {
+      display: flex !important;
+      flex-direction: row !important;
+      align-items: center;
+      width: 100%;
+      gap: 8px;
+    }
+    .rr-progress {
+      flex: 1 !important;
+      display: block !important;
+      height: 8px !important;
+      min-width: 0;
+      background: #e8e0d4 !important;
+      border-radius: 4px;
+      position: relative !important;
+      overflow: visible !important;
+      cursor: pointer;
+    }
+    .rr-progress__step {
+      display: block !important;
+      position: absolute !important;
+      left: 0; top: 0; bottom: 0;
+      background: #241f1a !important;
+      border-radius: 4px;
+    }
+    .rr-progress__handler {
+      display: block !important;
+      position: absolute !important;
+      width: 14px !important;
+      height: 14px !important;
+      border-radius: 50% !important;
+      background: #241f1a !important;
+      top: 50% !important;
+      transform: translate(-50%, -50%) !important;
+      cursor: grab;
+    }
   </style>
 </head>
 <body>
@@ -26,7 +64,7 @@
     <div id="loading">Loading session…</div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/rrweb-player@latest/dist/index.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/rrweb-player@1.1.3/dist/index.js"></script>
   <script>
     const SESSION_ID = '{{ session_id }}';
     const API_KEY    = '{{ api_key }}';
