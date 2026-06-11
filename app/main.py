@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -45,6 +46,7 @@ app = FastAPI(
     openapi_url=None,
 )
 
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -72,6 +74,13 @@ async def options_any(path: str):
 async def head_any(path: str):
     # FastAPI/Starlette can still emit 405 for HEAD on some routes behind proxies.
     return Response(status_code=200)
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    # Without this GET route the catch-all HEAD/OPTIONS handlers make Starlette
+    # return 405 (path matches a route, wrong method) instead of 404.
+    return Response(status_code=204)
 
 
 ACCESS_COOKIE = "tpt_access"
