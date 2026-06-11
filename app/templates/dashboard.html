@@ -99,6 +99,34 @@
 
         /* ── Empty / loading ── */
         .log-empty { text-align: center; color: var(--text-3); padding: 32px; font-size: 13px; }
+        @keyframes log-spin { to { transform: rotate(360deg); } }
+        .log-spinner {
+            display: inline-block; width: 12px; height: 12px;
+            border: 2px solid var(--border-md); border-top-color: var(--text-2);
+            border-radius: 50%; animation: log-spin 0.7s linear infinite;
+            margin-right: 6px; vertical-align: middle;
+        }
+
+        /* ── Entity list in personas table ── */
+        .entity-list { display: flex; flex-direction: column; gap: 3px; max-width: 220px; }
+        .entity-row { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
+        .entity-key {
+            font-size: 10px; color: var(--text-3); white-space: nowrap; flex-shrink: 0;
+            font-family: 'Geist Mono', monospace; letter-spacing: 0.01em;
+        }
+        .entity-val {
+            font-size: 11px; color: var(--text-1); white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis; max-width: 160px;
+            font-family: 'Geist Mono', monospace;
+        }
+        .entity-overflow { display: none; flex-direction: column; gap: 3px; margin-top: 1px; }
+        .entity-overflow.open { display: flex; }
+        .entity-more-btn {
+            font-size: 10px; color: var(--text-3); cursor: pointer; border: none;
+            background: none; padding: 2px 0; font-family: inherit; margin-top: 2px;
+            text-align: left;
+        }
+        .entity-more-btn:hover { color: var(--text-2); }
         .refresh-btn {
             float: right; padding: 4px 12px; font-size: 11px; border-radius: 6px;
             background: var(--bg-elevated); border: 1px solid var(--border-md); color: var(--text-2);
@@ -446,12 +474,32 @@
         }
     }
 
+    let _entityOverflowSeq = 0;
+    function renderEntityList(entities) {
+        if (!entities || !entities.length) return '—';
+        const MAX = 3;
+        const esc = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        const row = e => {
+            const val = String(e.value || '');
+            const display = val.length > 36 ? val.slice(0, 36) + '…' : val;
+            return `<div class="entity-row"><span class="entity-key">${esc(e.key)}</span><span class="entity-val" title="${esc(val)}">${esc(display)}</span></div>`;
+        };
+        const rows = entities.map(row);
+        if (rows.length <= MAX) return `<div class="entity-list">${rows.join('')}</div>`;
+        const id = `eo-${++_entityOverflowSeq}`;
+        const rest = rows.length - MAX;
+        return `<div class="entity-list">
+            ${rows.slice(0, MAX).join('')}
+            <div id="${id}" class="entity-overflow">${rows.slice(MAX).join('')}</div>
+            <button class="entity-more-btn" onclick="var el=document.getElementById('${id}');el.classList.toggle('open');this.textContent=el.classList.contains('open')?'show less':'+${rest} more'">+${rest} more</button>
+        </div>`;
+    }
+
     function renderPersonas(personas, personaScopeByDistinct) {
         const el = document.getElementById('personas-container');
         if (!personas.length) { el.innerHTML = '<div class="empty">No personas yet</div>'; return; }
         let html = '<table><thead><tr><th>Distinct ID</th><th>Name</th><th>Organization</th><th>Project</th><th>Entities</th><th>Created</th><th></th></tr></thead><tbody>';
         for (const p of personas) {
-            const entities = (p.entities || []).map(e => `<span class="badge badge-blue">${e.key}=${e.value}</span>`).join(' ');
             const did = p.distinct_id.replace(/'/g, "\\'");
             const exact = fmtTime(p.created_at);
             const scope = personaScopeByDistinct?.get(p.distinct_id) || { org: '—', project: '—' };
@@ -460,7 +508,7 @@
                 <td>${p.name || '--'}</td>
                 <td>${scope.org}</td>
                 <td>${scope.project}</td>
-                <td>${entities}</td>
+                <td>${renderEntityList(p.entities)}</td>
                 <td title="${exact}">${timeAgo(p.created_at)}</td>
                 <td><button class="refresh-btn" onclick="filterByPersona('${did}')" title="View action log">&#x1F50D;</button></td>
             </tr>`;
@@ -1035,6 +1083,8 @@
     }
 
     async function loadLogs() {
+        document.getElementById('activity-container').innerHTML =
+            '<div class="log-empty"><span class="log-spinner"></span>Loading…</div>';
         const did = activePersonaFilter || undefined;
         const hoursParam = activeTimeHours > 0 ? activeTimeHours : undefined;
 
