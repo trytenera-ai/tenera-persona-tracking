@@ -31,6 +31,33 @@
   var FLUSH_INTERVAL_MS = 5000;
   var FIRST_FLUSH_MS = 800;
 
+  // Campaign / ad-click params recognized for attribution (mirrors posthog-js CAMPAIGN_PARAMS)
+  var CAMPAIGN_PARAMS = [
+    'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term',
+    'gad_source', 'mc_cid',
+    'gclid', 'gclsrc', 'dclid', 'gbraid', 'wbraid', 'fbclid', 'msclkid',
+    'twclid', 'li_fat_id', 'igshid', 'ttclid', 'rdt_cid', 'epik', 'qclid',
+    'sccid', 'irclid', '_kx',
+  ];
+  var DIRECT = '$direct';
+  var INITIAL_INFO_KEY = '_tpt_initial';
+
+  // Form field names that suggest sensitive content (mirrors posthog-js autocapture)
+  var SENSITIVE_FIELD_RE =
+    /^cc|cardnum|ccnum|creditcard|csc|cvc|cvv|exp|pass|pwd|routing|seccode|securitycode|securitynum|socialsec|socsec|ssn/i;
+  // Values that look like credit card or SSN numbers are never captured
+  var CC_VALUE_RE =
+    /^(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|6(?:011|5[0-9]{2})[0-9]{12}|3[47][0-9]{13}|3(?:0[0-5]|[68][0-9])[0-9]{11}|(?:2131|1800|35[0-9]{3})[0-9]{11})$/;
+  var SSN_VALUE_RE = /^\d{3}-?\d{2}-?\d{4}$/;
+
+  // Rage click heuristic (mirrors posthog-js): 3 clicks, each within 30px
+  // (Manhattan distance) and 1000ms of the previous one
+  var RAGE_CLICK_COUNT = 3;
+  var RAGE_THRESHOLD_PX = 30;
+  var RAGE_TIMEOUT_MS = 1000;
+  // Pagination-style controls that invite rapid legitimate clicking
+  var RAGE_IGNORE_TEXT = ['next', 'previous', 'prev', '>', '<', '+', '-', '−', '–'];
+
   function uuid() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
       var r = (Math.random() * 16) | 0;
@@ -56,6 +83,92 @@
   var firstFlushTimer = null;
   var stopRecording = null;
   var pathnameRef = w.location.pathname;
+  var rageClicks = [];
+
+  function sanitizeText(raw) {
+    if (!raw) return undefined;
+    var text = raw.trim().replace(/\s+/g, ' ').slice(0, 100);
+    if (!text) return undefined;
+    if (CC_VALUE_RE.test(text.replace(/[- ]/g, '')) || SSN_VALUE_RE.test(text)) return undefined;
+    return text;
+  }
+
+  function getCampaignParams(url) {
+    var props = {};
+    try {
+      var search = new URL(url, w.location.href).searchParams;
+      for (var i = 0; i < CAMPAIGN_PARAMS.length; i++) {
+        var value = search.get(CAMPAIGN_PARAMS[i]);
+        if (value) props[CAMPAIGN_PARAMS[i]] = value;
+      }
+    } catch (e) {}
+    return props;
+  }
+
+  function referringDomain(referrer) {
+    if (!referrer || referrer === DIRECT) return DIRECT;
+    try { return new URL(referrer).host || DIRECT; } catch (e) { return DIRECT; }
+  }
+
+  // Last-touch attribution: campaign params from the current URL plus referrer
+  function getAttribution() {
+    var props = getCampaignParams(w.location.href);
+    props.referrer = (d.referrer || DIRECT).slice(0, 1000);
+    props.referring_domain = referringDomain(d.referrer);
+    return props;
+  }
+
+  // First-touch attribution: the referrer/URL of this device's very first visit,
+  // stored once and expanded to initial_* properties (mirrors PostHog $initial_*).
+  // Stored as the raw {r, u} pair so the recognized param list can evolve later.
+  function getInitialProps() {
+    var info;
+    try {
+      var stored = localStorage.getItem(INITIAL_INFO_KEY);
+      if (!stored) {
+        stored = JSON.stringify({
+          r: (d.referrer || DIRECT).slice(0, 1000),
+          u: w.location.href.slice(0, 1000),
+        });
+        localStorage.setItem(INITIAL_INFO_KEY, stored);
+      }
+      info = JSON.parse(stored);
+    } catch (e) { return {}; }
+    if (!info) return {};
+    var props = {
+      initial_referrer: info.r,
+      initial_referring_domain: referringDomain(info.r),
+    };
+    if (info.u) {
+      props.initial_current_url = info.u;
+      try { props.initial_pathname = new URL(info.u).pathname; } catch (e) {}
+      var campaign = getCampaignParams(info.u);
+      for (var key in campaign) props['initial_' + key] = campaign[key];
+    }
+    return props;
+  }
+
+  function isRageClick(x, y, timestamp) {
+    var last = rageClicks[rageClicks.length - 1];
+    if (
+      last &&
+      Math.abs(x - last.x) + Math.abs(y - last.y) < RAGE_THRESHOLD_PX &&
+      timestamp - last.timestamp < RAGE_TIMEOUT_MS
+    ) {
+      rageClicks.push({ x: x, y: y, timestamp: timestamp });
+      if (rageClicks.length === RAGE_CLICK_COUNT) return true;
+    } else {
+      rageClicks = [{ x: x, y: y, timestamp: timestamp }];
+    }
+    return false;
+  }
+
+  function shouldCaptureRageClick(el) {
+    if (!el || !el.closest) return true;
+    if (el.closest('.ph-no-capture, .ph-no-rageclick')) return false;
+    var text = (el.textContent || '').trim().toLowerCase();
+    return RAGE_IGNORE_TEXT.indexOf(text) === -1;
+  }
 
   function projectHeaders() {
     var headers = { 'Content-Type': 'application/json', 'X-API-Key': WRITE_KEY };
@@ -148,7 +261,11 @@
         pathnameRef = w.location.pathname;
         lastPath = pathnameRef;
         pageEntryTime = Date.now();
-        tptTrack('page_view', { page: pathnameRef, url: w.location.href });
+        tptTrack('page_view', Object.assign(
+          { page: pathnameRef, url: w.location.href },
+          getAttribution(),
+          getInitialProps()
+        ));
         loadRrweb();
         d.addEventListener('click', handleClick, true);
         d.addEventListener('submit', handleSubmit, true);
@@ -159,13 +276,24 @@
   function handleClick(e) {
     if (!sessionId) return;
     var el = e.target;
+    // Rage clicks fire on any element — clicking dead UI is exactly the signal
+    if (
+      isRageClick(e.clientX, e.clientY, e.timeStamp || Date.now()) &&
+      shouldCaptureRageClick(el)
+    ) {
+      tptTrack('rage_click', {
+        text: el && el.textContent ? sanitizeText(el.textContent) : undefined,
+        element: el && el.tagName ? el.tagName.toLowerCase() : undefined,
+        page: pathnameRef,
+      });
+    }
     var interactive = el.closest
       ? el.closest('button, a[href], [role="button"], input[type="submit"], input[type="button"]')
       : null;
     if (!interactive) return;
+    if (interactive.closest && interactive.closest('.ph-no-capture')) return;
     var tagName = interactive.tagName.toLowerCase();
-    var text = (interactive.textContent || interactive.getAttribute('aria-label') || '')
-      .trim().replace(/\s+/g, ' ').slice(0, 100) || undefined;
+    var text = sanitizeText(interactive.textContent || interactive.getAttribute('aria-label') || '');
     var href = tagName === 'a' ? interactive.href : undefined;
     tptTrack('click', { text: text, href: href, element: tagName, page: pathnameRef });
   }
@@ -176,7 +304,9 @@
     var els = e.target.elements || [];
     for (var i = 0; i < els.length; i++) {
       var el = els[i];
-      if (el.name && el.type !== 'password' && el.type !== 'hidden') fields.push(el.name);
+      if (!el.name || el.type === 'password' || el.type === 'hidden') continue;
+      if (SENSITIVE_FIELD_RE.test(el.name.replace(/[^a-zA-Z0-9]/g, ''))) continue;
+      fields.push(el.name);
     }
     tptTrack('form_submit', {
       form_id: e.target.id || e.target.name || undefined,
@@ -194,7 +324,7 @@
     lastPath = newPath;
     pathnameRef = newPath;
     pageEntryTime = Date.now();
-    tptTrack('page_view', { page: newPath, url: w.location.href });
+    tptTrack('page_view', Object.assign({ page: newPath, url: w.location.href }, getAttribution()));
   }
 
   ['pushState', 'replaceState'].forEach(function (fn) {
